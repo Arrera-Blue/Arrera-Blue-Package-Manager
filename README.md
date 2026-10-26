@@ -1,1 +1,36 @@
-# Arrera Blue Package manager 
+# Arrera Blue Package Manager (abpm)
+
+## Arguments et Commandes
+
+### Update
+
+- `update` : Met à jour les dépôts et effectue toutes les mises à jour.
+- `check` : Met à jour les dépôts et affiche la liste des applications à mettre à jour, peu importe si elles proviennent de Flathub ou de DNF.
+
+### Install
+
+- `install [PAQUET]` : Lance le programme d'installation en cherchant en priorité dans DNF. S'il ne trouve pas, il cherche dans Flathub. Avant de lancer l'installation, il affiche ce qu'il va installer pour confirmation.
+- `install --dnf [PAQUET]` : Lance le programme d'installation en appelant uniquement DNF.
+- `install --flatpak [PAQUET]` : Lance le programme d'installation en appelant uniquement Flatpak.
+- `install --rpm [FICHIER_RPM]` : Installation d'un paquet RPM local (comme DNF sous Fedora).
+- `install --appimage [FICHIER_APPIMAGE]` : Installation et intégration d'une application au format AppImage.
+- `install --tar [FICHIER_TAR_XZ]` : Installation d'une application distribuée sous forme d'archive tar (en copiant son contenu dans un dossier spécifique et en créant le fichier `.desktop` adéquat pour la lancer et la rendre désinstallable). Permet également de choisir si on l'installe pour l'utilisateur ou pour le système.
+
+### Remove
+
+- `remove [PAQUET...]` : Désinstalle les applications, peu importe leur provenance (Flatpak, DNF ou autre). Permet de spécifier plusieurs paquets à la suite comme avec DNF.
+
+### Search
+
+- `search [PAQUET]` : Cherche les paquets disponibles, que ce soit sur DNF ou sur Flathub.
+- `search --dnf [PAQUET]` : Cherche les paquets disponibles uniquement sur DNF.
+- `search --flatpak [PAQUET]` : Cherche les paquets disponibles uniquement sur Flathub.
+
+### List
+
+- `list` : Liste tous les paquets Flatpak et DNF installés.
+- `list --dnf` : Liste tous les paquets DNF installés.
+- `list --flatpak` : Liste tous les paquets Flatpak installés.
+- `list --rpm` : Liste tous les paquets installés via un fichier RPM local.
+- `list --appimage` : Liste toutes les applications installées au format AppImage.
+- `list --tar` : Liste toutes les applications installées via une archive tar.xz.

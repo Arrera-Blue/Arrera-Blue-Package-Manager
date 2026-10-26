@@ -28,6 +28,7 @@ add_executable(abpm
     src/core/logger.cpp
     src/cli/cli_parser.cpp
     src/flatpak/flatpak_backend.cpp
+    src/dnf/dnf_backend.cpp
 )
 
 # Dossier des en-têtes (#include <abpm/...>)

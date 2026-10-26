@@ -1,6 +1,7 @@
 #include "abpm/core/logger.hpp"
 #include "abpm/cli/cli_parser.hpp"
 #include "abpm/flatpak/flatpak_backend.hpp"
+#include "abpm/dnf/dnf_backend.hpp"
 #include <iomanip>
 #include <iostream>
 
@@ -9,6 +10,7 @@ using abpm::cli::CliParser;
 using abpm::cli::CommandType;
 using abpm::cli::SourceFilter;
 using abpm::flatpak::FlatpakBackend;
+using abpm::dnf::DnfBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -25,7 +27,21 @@ int main(int argc, char* argv[]) {
         case CommandType::LIST: {
             Logger::banner();
 
-            // Si filtre ALL ou FLATPAK
+            // 1. DNF (si filtre ALL ou DNF)
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
+                Logger::info("Récupération des paquets DNF (RPM)...");
+                auto rpm_pkgs = DnfBackend::list_installed();
+
+                std::cout << "\n--- Paquets Système DNF (" << rpm_pkgs.size() << ") ---\n";
+                for (const auto& pkg : rpm_pkgs) {
+                    std::cout << " • " << std::left << std::setw(30) << pkg.name 
+                              << " " << std::setw(32) << pkg.version 
+                              << "(" << pkg.arch << ")\n";
+                }
+                std::cout << "\n";
+            }
+
+            // 2. Flatpak (si filtre ALL ou FLATPAK)
             if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
                 Logger::info("Récupération des applications Flatpak...");
                 auto apps = FlatpakBackend::list_installed();

@@ -1,26 +1,65 @@
 #include "abpm/core/logger.hpp"
-#include <flatpak.h>
-#include <libdnf5/base/base.hpp>
+#include "abpm/cli/cli_parser.hpp"
+
+using abpm::core::Logger;
+using abpm::cli::CliParser;
+using abpm::cli::CommandType;
+using abpm::cli::SourceFilter;
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    auto options = CliParser::parse(argc, argv);
 
-    using abpm::core::Logger;
+    switch (options.command) {
+        case CommandType::HELP:
+            CliParser::print_help();
+            break;
 
-    Logger::banner();
-    Logger::info("Vérification des liaisons natives...");
+        case CommandType::VERSION:
+            CliParser::print_version();
+            break;
 
-    // Test libdnf5
-    libdnf5::Base dnf_base;
-    Logger::success("libdnf5 (C++) initialisée avec succès !");
+        case CommandType::UPDATE:
+            Logger::info("Commande reçue : 'update' (Mise à jour globale)");
+            break;
 
-    // Test libflatpak
-    Logger::success(std::string("libflatpak (C) liée avec succès (architecture : ") + 
-                   flatpak_get_default_arch() + ") !");
+        case CommandType::CHECK:
+            Logger::info("Commande reçue : 'check' (Vérification des mises à jour)");
+            break;
 
-    Logger::warning("Exemple de message d'avertissement.");
-    Logger::error("Exemple de message d'erreur.");
+        case CommandType::INSTALL:
+            if (options.arguments.empty()) {
+                Logger::error("Argument manquant : spécifiez un paquet ou un fichier à installer.");
+                return 1;
+            }
+            Logger::info(std::string("Commande reçue : 'install' pour ") + options.arguments[0]);
+            break;
+
+        case CommandType::REMOVE:
+            if (options.arguments.empty()) {
+                Logger::error("Argument manquant : spécifiez au moins un paquet à désinstaller.");
+                return 1;
+            }
+            Logger::info("Commande reçue : 'remove'");
+            for (const auto& pkg : options.arguments) {
+                Logger::info(std::string(" - À désinstaller : ") + pkg);
+            }
+            break;
+
+        case CommandType::SEARCH:
+            if (options.arguments.empty()) {
+                Logger::error("Argument manquant : spécifiez un terme de recherche.");
+                return 1;
+            }
+            Logger::info(std::string("Commande reçue : 'search' pour '") + options.arguments[0] + "'");
+            break;
+
+        case CommandType::LIST:
+            Logger::info("Commande reçue : 'list'");
+            break;
+
+        default:
+            break;
+    }
 
     return 0;
 }

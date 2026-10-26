@@ -26,6 +26,7 @@ pkg_check_modules(GLIB2 REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0)
 add_executable(abpm
     src/main.cpp
     src/core/logger.cpp
+    src/cli/cli_parser.cpp
 )
 
 # Dossier des en-têtes (#include <abpm/...>)

@@ -9,6 +9,7 @@ namespace abpm::flatpak {
 using core::PackageInfo;
 using core::PackageSource;
 using core::Logger;
+using core::UpdateInfo;
 
 static void collect_from_installation(FlatpakInstallation* installation, 
                                       const std::string& origin_label,
@@ -109,6 +110,44 @@ std::vector<PackageInfo> FlatpakBackend::search(std::string_view term) {
         }
     }
     return results;
+}
+
+static void collect_updates_from_installation(FlatpakInstallation* inst,
+                                              const std::string& default_origin,
+                                              std::vector<UpdateInfo>& out_updates) {
+    if (!inst) return;
+    g_autoptr(GError) err = nullptr;
+    g_autoptr(GPtrArray) refs = flatpak_installation_list_installed_refs_for_update(inst, nullptr, &err);
+    if (!refs) return;
+    for (guint i = 0; i < refs->len; ++i) {
+        auto* ref = FLATPAK_INSTALLED_REF(g_ptr_array_index(refs, i));
+        const char* raw_id = flatpak_ref_get_name(FLATPAK_REF(ref));
+        const char* raw_name = flatpak_installed_ref_get_appdata_name(ref);
+        const char* raw_ver = flatpak_installed_ref_get_appdata_version(ref);
+        const char* origin = flatpak_installed_ref_get_origin(ref);
+        const char* arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+        UpdateInfo info;
+        info.id = raw_id ? raw_id : "";
+        info.name = raw_name ? raw_name : info.id;
+        info.current_ver = raw_ver ? raw_ver : "actuelle";
+        info.new_ver = "mise à jour dispo";
+        info.arch = arch ? arch : "";
+        info.source = PackageSource::FLATPAK;
+        info.origin = origin ? origin : default_origin;
+        out_updates.push_back(std::move(info));
+    }
+}
+std::vector<UpdateInfo> FlatpakBackend::check_updates() {
+    std::vector<UpdateInfo> updates;
+    // 1. Mises à jour système
+    g_autoptr(GError) err_sys = nullptr;
+    g_autoptr(FlatpakInstallation) sys_inst = flatpak_installation_new_system(nullptr, &err_sys);
+    collect_updates_from_installation(sys_inst, "flathub (system)", updates);
+    // 2. Mises à jour utilisateur
+    g_autoptr(GError) err_user = nullptr;
+    g_autoptr(FlatpakInstallation) user_inst = flatpak_installation_new_user(nullptr, &err_user);
+    collect_updates_from_installation(user_inst, "flathub (user)", updates);
+    return updates;
 }
 
 } // namespace abpm::flatpak

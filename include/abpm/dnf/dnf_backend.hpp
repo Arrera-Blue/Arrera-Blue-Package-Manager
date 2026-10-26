@@ -11,6 +11,8 @@ public:
     static std::vector<core::PackageInfo> list_installed();
 
     static std::vector<core::PackageInfo> search(std::string_view term);
+
+    static std::vector<core::UpdateInfo> check_updates();
 };
 
 } // namespace abpm::dnf

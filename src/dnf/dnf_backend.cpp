@@ -9,6 +9,7 @@ namespace abpm::dnf {
 using core::PackageInfo;
 using core::PackageSource;
 using core::Logger;
+using core::UpdateInfo;
 
 std::vector<PackageInfo> DnfBackend::list_installed() {
     std::vector<PackageInfo> results;
@@ -72,6 +73,44 @@ std::vector<PackageInfo> DnfBackend::search(std::string_view term) {
         Logger::error(std::string("Erreur recherche DNF : ") + e.what());
     }
     return results;
+}
+
+std::vector<UpdateInfo> DnfBackend::check_updates() {
+    std::vector<UpdateInfo> updates;
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+        repo_sack->load_repos();
+        // Récupérer les paquets qui sont des mises à jour de paquets installés
+        libdnf5::rpm::PackageQuery query(base);
+        query.filter_upgrades();
+        updates.reserve(query.size());
+        for (const auto& pkg : query) {
+            UpdateInfo info;
+            info.name = pkg.get_name();
+            info.id = pkg.get_nevra();
+            info.new_ver = pkg.get_evr();
+            info.arch = pkg.get_arch();
+            info.source = PackageSource::DNF;
+            info.origin = "dnf";
+            // Trouver la version actuellement installée
+            libdnf5::rpm::PackageQuery installed_query(base);
+            installed_query.filter_installed();
+            installed_query.filter_name(pkg.get_name());
+            if (installed_query.size() > 0) {
+                info.current_ver = (*installed_query.begin()).get_evr();
+            } else {
+                info.current_ver = "inconnue";
+            }
+            updates.push_back(std::move(info));
+        }
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur vérification DNF : ") + e.what());
+    }
+    return updates;
 }
 
 } // namespace abpm::dnf

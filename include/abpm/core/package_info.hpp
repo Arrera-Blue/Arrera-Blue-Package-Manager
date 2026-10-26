@@ -21,4 +21,14 @@ struct PackageInfo {
     std::string origin;        // "system", "user", etc.
 };
 
+struct UpdateInfo {
+    std::string name;          // Nom
+    std::string id;            // Identifiant
+    std::string current_ver;   // Version actuellement installée
+    std::string new_ver;       // Version disponible
+    std::string arch;          // Architecture
+    PackageSource source;      // DNF ou FLATPAK
+    std::string origin;        // "flathub", "dnf", etc.
+};
+
 } // namespace abpm::core

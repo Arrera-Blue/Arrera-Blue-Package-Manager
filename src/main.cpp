@@ -89,6 +89,53 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        case CommandType::CHECK: {
+            Logger::banner();
+            Logger::info("Vérification des mises à jour disponibles...");
+
+            size_t total_updates = 0;
+
+            // 1. Vérification DNF
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
+                Logger::info("Vérification des paquets DNF (RPM)...");
+                auto dnf_updates = DnfBackend::check_updates();
+                total_updates += dnf_updates.size();
+
+                if (!dnf_updates.empty()) {
+                    std::cout << "\n--- Mises à jour DNF (" << dnf_updates.size() << ") ---\n";
+                    for (const auto& up : dnf_updates) {
+                        std::cout << " • " << std::left << std::setw(30) << up.name
+                                  << " " << up.current_ver << " -> " << up.new_ver
+                                  << " (" << up.arch << ")\n";
+                    }
+                }
+            }
+
+            // 2. Vérification Flatpak
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
+                Logger::info("Vérification des applications Flatpak...");
+                auto flatpak_updates = FlatpakBackend::check_updates();
+                total_updates += flatpak_updates.size();
+
+                if (!flatpak_updates.empty()) {
+                    std::cout << "\n--- Mises à jour Flatpak (" << flatpak_updates.size() << ") ---\n";
+                    for (const auto& up : flatpak_updates) {
+                        std::cout << " • " << std::left << std::setw(32) << up.name
+                                  << " [" << up.id << "] (" << up.origin << ")\n";
+                    }
+                }
+            }
+
+            std::cout << "\n";
+            if (total_updates == 0) {
+                Logger::success("Tous les paquets et applications sont à jour !");
+            } else {
+                Logger::info(std::string("Total : ") + std::to_string(total_updates) + 
+                            " mise(s) à jour disponible(s). Tapez 'abpm update' pour les appliquer.");
+            }
+            break;
+        }
+
         default:
             Logger::info("Commande en cours de développement...");
             break;

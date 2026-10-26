@@ -3,6 +3,9 @@
 #include <libdnf5/base/base.hpp>
 #include <libdnf5/repo/repo_sack.hpp>
 #include <libdnf5/rpm/package_query.hpp>
+#include <libdnf5/base/goal.hpp>
+#include <libdnf5/base/transaction.hpp>
+#include <unistd.h>
 
 namespace abpm::dnf {
 
@@ -111,6 +114,55 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
         Logger::error(std::string("Erreur vérification DNF : ") + e.what());
     }
     return updates;
+}
+
+bool DnfBackend::update() {
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+        repo_sack->load_repos();
+
+        libdnf5::Goal goal(base);
+        // Demander la mise à jour de tous les paquets système
+        goal.add_rpm_upgrade();
+
+        auto transaction = goal.resolve();
+
+        if (transaction.empty()) {
+            Logger::success("Tous les paquets système DNF sont déjà à jour !");
+            return true;
+        }
+
+        auto count = transaction.get_transaction_packages_count();
+        Logger::info(std::string("Paquets RPM à mettre à jour : ") + std::to_string(count));
+
+        // Vérification des privilèges root pour installer des paquets système
+        if (geteuid() != 0) {
+            Logger::warning("Pour installer les mises à jour système DNF, exécutez la commande avec sudo : 'sudo abpm update'");
+            return false;
+        }
+
+        Logger::info("Téléchargement des paquets RPM...");
+        transaction.download();
+
+        Logger::info("Application des paquets système...");
+        auto result = transaction.run();
+
+        if (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
+            Logger::success("Mise à jour système DNF terminée avec succès !");
+            return true;
+        } else {
+            Logger::error("Échec de l'application de la transaction DNF.");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur mise à jour DNF : ") + e.what());
+        return false;
+    }
 }
 
 } // namespace abpm::dnf

@@ -136,6 +136,34 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        case CommandType::UPDATE: {
+            Logger::banner();
+            Logger::info("Lancement des mises à jour...");
+
+            bool dnf_ok = true;
+            bool flatpak_ok = true;
+
+            // 1. Mise à jour DNF
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
+                Logger::info("--- Mise à jour du système DNF (RPM) ---");
+                dnf_ok = DnfBackend::update();
+            }
+
+            // 2. Mise à jour Flatpak
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
+                Logger::info("--- Mise à jour des applications Flatpak ---");
+                flatpak_ok = FlatpakBackend::update();
+            }
+
+            std::cout << "\n";
+            if (dnf_ok && flatpak_ok) {
+                Logger::success("Toutes les opérations de mise à jour se sont terminées avec succès !");
+            } else {
+                Logger::warning("Certaines opérations de mise à jour n'ont pas pu aboutir.");
+            }
+            break;
+        }
+
         default:
             Logger::info("Commande en cours de développement...");
             break;

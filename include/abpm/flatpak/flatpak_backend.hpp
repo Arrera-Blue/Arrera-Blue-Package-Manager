@@ -11,8 +11,8 @@ public:
     static std::vector<core::PackageInfo> list_installed();
     static std::vector<core::PackageInfo> search(std::string_view term);
 
-    // Vérifie les mises à jour disponibles pour les Flatpaks
     static std::vector<core::UpdateInfo> check_updates();
+    static bool update();
 };
 
 } // namespace abpm::flatpak

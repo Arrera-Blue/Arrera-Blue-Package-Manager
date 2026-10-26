@@ -150,4 +150,63 @@ std::vector<UpdateInfo> FlatpakBackend::check_updates() {
     return updates;
 }
 
+bool FlatpakBackend::update() {
+    g_autoptr(GError) err = nullptr;
+    g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
+    if (!inst) {
+        Logger::error(std::string("Erreur d'accès à Flatpak : ") + (err ? err->message : "inconnue"));
+        return false;
+    }
+
+    // Récupérer les paquets à mettre à jour
+    g_autoptr(GError) refs_err = nullptr;
+    g_autoptr(GPtrArray) refs = flatpak_installation_list_installed_refs_for_update(inst, nullptr, &refs_err);
+    if (!refs || refs->len == 0) {
+        Logger::success("Toutes les applications Flatpak sont déjà à jour !");
+        return true;
+    }
+
+    g_autoptr(GError) tx_err = nullptr;
+    g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
+    if (!tx) {
+        Logger::error(std::string("Impossible d'initialiser la transaction Flatpak : ") + (tx_err ? tx_err->message : ""));
+        return false;
+    }
+
+    // Ajouter chaque mise à jour à la transaction
+    for (guint i = 0; i < refs->len; ++i) {
+        auto* ref = FLATPAK_INSTALLED_REF(g_ptr_array_index(refs, i));
+        const char* formatted_ref = flatpak_ref_format_ref_cached(FLATPAK_REF(ref));
+        if (!formatted_ref) continue;
+
+        g_autoptr(GError) add_err = nullptr;
+        if (!flatpak_transaction_add_update(tx, formatted_ref, nullptr, nullptr, &add_err)) {
+            if (add_err) {
+                Logger::warning(std::string("Impossible d'ajouter ") + formatted_ref + " : " + add_err->message);
+            }
+        }
+    }
+
+    if (flatpak_transaction_is_empty(tx)) {
+        Logger::success("Aucune mise à jour requise pour Flatpak.");
+        return true;
+    }
+
+    // Afficher chaque opération en cours
+    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
+        const char* r = flatpak_transaction_operation_get_ref(op);
+        Logger::info(std::string("Mise à jour en cours : ") + (r ? r : ""));
+    }), nullptr);
+
+    Logger::info("Exécution de la transaction Flatpak...");
+    g_autoptr(GError) run_err = nullptr;
+    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
+        Logger::error(std::string("Échec de la transaction Flatpak : ") + (run_err ? run_err->message : ""));
+        return false;
+    }
+
+    Logger::success("Mises à jour Flatpak appliquées avec succès !");
+    return true;
+}
+
 } // namespace abpm::flatpak

@@ -1,0 +1,20 @@
+# Dossiers de compilation CMake
+build/
+bin/
+lib/
+out/
+CMakeFiles/
+CMakeCache.txt
+
+# Fichiers objets et bibliothèques
+*.o
+*.a
+*.so
+
+# Outils et caches IDE / Éditeurs
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+compile_commands.json

@@ -271,4 +271,63 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
     return true;
 }
 
+std::string FlatpakBackend::find_installed_ref(std::string_view name_or_id) {
+    auto installed = list_installed();
+    std::string needle = to_lower(name_or_id);
+
+    for (const auto& app : installed) {
+        if (to_lower(app.id) == needle || to_lower(app.name) == needle ||
+            to_lower(app.id).ends_with("." + needle)) {
+            const char* arch = app.arch.empty() ? flatpak_get_default_arch() : app.arch.c_str();
+            return "app/" + app.id + "/" + (arch ? arch : "x86_64") + "/stable";
+        }
+    }
+    return "";
+}
+
+bool FlatpakBackend::remove(const std::vector<std::string>& formatted_refs) {
+    if (formatted_refs.empty()) return true;
+
+    g_autoptr(GError) err = nullptr;
+    g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
+    if (!inst) {
+        Logger::error("Impossible d'accéder au système Flatpak.");
+        return false;
+    }
+
+    g_autoptr(GError) tx_err = nullptr;
+    g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
+    if (!tx) {
+        Logger::error("Impossible d'initialiser la transaction Flatpak.");
+        return false;
+    }
+
+    for (const auto& ref : formatted_refs) {
+        g_autoptr(GError) add_err = nullptr;
+        if (!flatpak_transaction_add_uninstall(tx, ref.c_str(), &add_err)) {
+            if (add_err) {
+                Logger::warning(std::string("Erreur préparation désinstallation : ") + add_err->message);
+            }
+        }
+    }
+
+    if (flatpak_transaction_is_empty(tx)) {
+        return false;
+    }
+
+    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
+        const char* r = flatpak_transaction_operation_get_ref(op);
+        Logger::info(std::string("Désinstallation en cours : ") + (r ? r : ""));
+    }), nullptr);
+
+    Logger::info("Suppression des applications Flatpak...");
+    g_autoptr(GError) run_err = nullptr;
+    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
+        Logger::error(std::string("Échec de la désinstallation Flatpak : ") + (run_err ? run_err->message : ""));
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace abpm::flatpak

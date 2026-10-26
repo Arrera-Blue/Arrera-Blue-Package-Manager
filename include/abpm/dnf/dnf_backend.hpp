@@ -15,6 +15,8 @@ public:
     static std::vector<core::UpdateInfo> check_updates();
     static bool update();
     static bool install(std::string_view package_name, bool assumeyes);
+    static bool is_installed(std::string_view name);
+    static bool remove(const std::vector<std::string>& package_names);
 };
 
 } // namespace abpm::dnf

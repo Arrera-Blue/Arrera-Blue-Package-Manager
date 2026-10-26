@@ -229,4 +229,52 @@ bool DnfBackend::install(std::string_view package_name, bool assumeyes) {
     }
 }
 
+bool DnfBackend::is_installed(std::string_view name) {
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        base.get_repo_sack()->load_repos(libdnf5::repo::Repo::Type::SYSTEM);
+        libdnf5::rpm::PackageQuery q(base);
+        q.filter_installed();
+        q.filter_name(std::string(name));
+        return !q.empty();
+    } catch (...) {
+        return false;
+    }
+}
+bool DnfBackend::remove(const std::vector<std::string>& package_names) {
+    if (package_names.empty()) return true;
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+        repo_sack->load_repos();
+        libdnf5::Goal goal(base);
+        for (const auto& pkg : package_names) {
+            goal.add_rpm_remove(pkg);
+        }
+        auto transaction = goal.resolve();
+        if (transaction.empty()) {
+            for (const auto& log : transaction.get_resolve_logs_as_strings()) {
+                Logger::warning(log);
+            }
+            return false;
+        }
+        if (geteuid() != 0) {
+            Logger::warning("La suppression de paquets système DNF nécessite les privilèges administrateur.");
+            Logger::info("Relancez avec sudo pour finaliser la suppression DNF.");
+            return false;
+        }
+        Logger::info("Désinstallation des paquets RPM en cours...");
+        auto result = transaction.run();
+        return (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS);
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur suppression DNF : ") + e.what());
+        return false;
+    }
+}
+
 } // namespace abpm::dnf

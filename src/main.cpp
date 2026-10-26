@@ -242,6 +242,81 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        case CommandType::REMOVE: {
+            if (options.arguments.empty()) {
+                Logger::error("Spécifiez au moins un paquet à désinstaller (ex: abpm remove vlc gimp)");
+                return 1;
+            }
+            Logger::banner();
+            Logger::info("Analyse des paquets à désinstaller...");
+            std::vector<std::string> dnf_to_remove;
+            std::vector<std::string> flatpak_to_remove;
+            std::vector<std::string> not_found;
+            for (const auto& pkg : options.arguments) {
+                // 1. Vérifier si c'est une application Flatpak
+                std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg);
+                if (!flatpak_ref.empty()) {
+                    flatpak_to_remove.push_back(flatpak_ref);
+                    continue;
+                }
+                // 2. Vérifier si c'est un paquet DNF
+                if (DnfBackend::is_installed(pkg)) {
+                    dnf_to_remove.push_back(pkg);
+                    continue;
+                }
+                // 3. Introuvable
+                not_found.push_back(pkg);
+            }
+            for (const auto& missing : not_found) {
+                Logger::warning("Le paquet '" + missing + "' n'est pas installé sur le système.");
+            }
+            size_t total_found = dnf_to_remove.size() + flatpak_to_remove.size();
+            if (total_found == 0) {
+                Logger::error("Aucun des paquets spécifiés n'est actuellement installé.");
+                break;
+            }
+            // Récapitulatif
+            if (!dnf_to_remove.empty()) {
+                std::cout << "\n--- Paquets DNF à désinstaller (" << dnf_to_remove.size() << ") ---\n";
+                for (const auto& p : dnf_to_remove) {
+                    std::cout << " • " << p << "\n";
+                }
+            }
+            if (!flatpak_to_remove.empty()) {
+                std::cout << "\n--- Applications Flatpak à désinstaller (" << flatpak_to_remove.size() << ") ---\n";
+                for (const auto& ref : flatpak_to_remove) {
+                    std::cout << " • " << ref << "\n";
+                }
+            }
+            std::cout << "\n";
+            // Demande de confirmation
+            if (!options.assumeyes) {
+                if (!Logger::confirm("Voulez-vous procéder à la désinstallation ?")) {
+                    Logger::info("Désinstallation annulée.");
+                    break;
+                }
+            }
+            // Exécution
+            bool dnf_ok = true;
+            bool flatpak_ok = true;
+            if (!dnf_to_remove.empty()) {
+                dnf_ok = DnfBackend::remove(dnf_to_remove);
+                if (dnf_ok) {
+                    Logger::success("Paquets DNF désinstallés avec succès !");
+                }
+            }
+            if (!flatpak_to_remove.empty()) {
+                flatpak_ok = FlatpakBackend::remove(flatpak_to_remove);
+                if (flatpak_ok) {
+                    Logger::success("Applications Flatpak désinstallées avec succès !");
+                }
+            }
+            if (dnf_ok && flatpak_ok) {
+                Logger::success("Toutes les désinstallations ont été effectuées avec succès !");
+            }
+            break;
+        }
+
         default:
             Logger::info("Commande en cours de développement...");
             break;

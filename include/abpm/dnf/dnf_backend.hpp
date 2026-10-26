@@ -17,6 +17,8 @@ public:
     static bool install(std::string_view package_name, bool assumeyes);
     static bool is_installed(std::string_view name);
     static bool remove(const std::vector<std::string>& package_names);
+    static bool install_local_rpm(const std::string& file_path, bool assumeyes);
+    static std::vector<core::PackageInfo> list_installed_local_rpms();
 };
 
 } // namespace abpm::dnf

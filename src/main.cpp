@@ -55,6 +55,17 @@ int main(int argc, char* argv[]) {
                 }
                 std::cout << "\n";
             }
+            if (options.filter == SourceFilter::RPM) {
+                Logger::info("Récupération des paquets installés via fichier RPM local...");
+                auto local_rpms = DnfBackend::list_installed_local_rpms();
+                std::cout << "\n--- Paquets RPM locaux (" << local_rpms.size() << ") ---\n";
+                for (const auto& pkg : local_rpms) {
+                    std::cout << " • " << std::left << std::setw(30) << pkg.name 
+                              << " " << std::setw(32) << pkg.version 
+                              << "(" << pkg.arch << ")\n";
+                }
+                std::cout << "\n";
+            }
             break;
         }
         
@@ -208,8 +219,14 @@ int main(int argc, char* argv[]) {
             Logger::banner();
             Logger::info("Préparation de l'installation de '" + pkg_name + "'...");
             bool handled = false;
+            // Cas 0 : Installation d'un fichier RPM local (--rpm)
+            if (options.filter == SourceFilter::RPM) {
+                Logger::info("Installation du fichier RPM local : " + pkg_name);
+                DnfBackend::install_local_rpm(pkg_name, options.assumeyes);
+                handled = true;
+            }
             // Cas 1 : Forcer DNF (--dnf)
-            if (options.filter == SourceFilter::DNF) {
+            else if (options.filter == SourceFilter::DNF) {
                 Logger::info("Recherche dans les dépôts DNF...");
                 if (!DnfBackend::install(pkg_name, options.assumeyes)) {
                     Logger::error("Le paquet '" + pkg_name + "' est introuvable dans DNF.");

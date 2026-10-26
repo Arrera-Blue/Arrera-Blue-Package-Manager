@@ -30,6 +30,7 @@ void CliParser::print_help() {
               << "  --appimage <FICHIER>    Installer / lister des applications AppImage\n"
               << "  --tar <FICHIER>         Installer / lister des paquets tar.xz\n\n"
               << "OPTIONS GENERALES:\n"
+              << "  -y, --yes               Repondre oui a toutes les confirmations\n"
               << "  -h, --help              Affiche cette aide\n"
               << "  -v, --version           Affiche la version de abpm\n";
 }

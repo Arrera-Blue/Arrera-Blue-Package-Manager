@@ -1,25 +1,26 @@
-#include <iostream>
+#include "abpm/core/logger.hpp"
 #include <flatpak.h>
 #include <libdnf5/base/base.hpp>
-
-
 
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
-    std::cout << "===========================================" << std::endl;
-    std::cout << "  Arrera Blue Package Manager (abpm) v0.1  " << std::endl;
-    std::cout << "===========================================" << std::endl;
-    std::cout << "[INFO] Initialisation du système..." << std::endl;
+    using abpm::core::Logger;
 
-    // Test de détection libdnf5
+    Logger::banner();
+    Logger::info("Vérification des liaisons natives...");
+
+    // Test libdnf5
     libdnf5::Base dnf_base;
-    std::cout << "[SUCCÈS] libdnf5 liée avec succès !" << std::endl;
+    Logger::success("libdnf5 (C++) initialisée avec succès !");
 
-    // Test de détection libflatpak
-    std::cout << "[SUCCÈS] libflatpak liée avec succès (version " 
-              << flatpak_get_default_arch() << " détectée) !" << std::endl;
+    // Test libflatpak
+    Logger::success(std::string("libflatpak (C) liée avec succès (architecture : ") + 
+                   flatpak_get_default_arch() + ") !");
+
+    Logger::warning("Exemple de message d'avertissement.");
+    Logger::error("Exemple de message d'erreur.");
 
     return 0;
 }

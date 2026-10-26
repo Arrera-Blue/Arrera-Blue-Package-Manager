@@ -34,3 +34,14 @@
 - `list --rpm` : Liste tous les paquets installés via un fichier RPM local.
 - `list --appimage` : Liste toutes les applications installées au format AppImage.
 - `list --tar` : Liste toutes les applications installées via une archive tar.xz.
+
+
+## Convention d'Affichage et Messages
+
+Un module centralisé (`Logger` / `Terminal`) en C++ assure un affichage clair, coloré et cohérent dans le terminal :
+
+- `[INFO]` *(en bleu Arrera / cyan)* : Pour les étapes en cours (*ex: « Recherche dans les dépôts DNF... »*).
+- `[SUCCÈS]` *(en vert)* : Pour les opérations réussies (*ex: « Paquet vlc installé avec succès ! »*).
+- `[ATTENTION]` *(en jaune)* : Pour les avertissements sans blocage (*ex: « Flathub ne répond pas, bascule sur le cache local... »*).
+- `[ERREUR]` *(en rouge)* : Pour les erreurs bloquantes avec message explicite (*ex: « Erreur : Le paquet 'xyz' est introuvable ni dans DNF ni sur Flathub »*).
+

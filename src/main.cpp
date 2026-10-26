@@ -199,6 +199,49 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+         case CommandType::INSTALL: {
+            if (options.arguments.empty()) {
+                Logger::error("Spécifiez un paquet ou une application à installer (ex: abpm install vlc)");
+                return 1;
+            }
+            const auto& pkg_name = options.arguments[0];
+            Logger::banner();
+            Logger::info("Préparation de l'installation de '" + pkg_name + "'...");
+            bool handled = false;
+            // Cas 1 : Forcer DNF (--dnf)
+            if (options.filter == SourceFilter::DNF) {
+                Logger::info("Recherche dans les dépôts DNF...");
+                if (!DnfBackend::install(pkg_name, options.assumeyes)) {
+                    Logger::error("Le paquet '" + pkg_name + "' est introuvable dans DNF.");
+                }
+                handled = true;
+            }
+            // Cas 2 : Forcer Flatpak (--flatpak)
+            else if (options.filter == SourceFilter::FLATPAK) {
+                Logger::info("Recherche sur Flathub / Flatpak...");
+                if (!FlatpakBackend::install(pkg_name, options.assumeyes)) {
+                    Logger::error("L'application '" + pkg_name + "' est introuvable sur Flathub.");
+                }
+                handled = true;
+            }
+            // Cas 3 : Cascade intelligente par défaut (DNF en priorité, puis Flathub)
+            else {
+                Logger::info("Recherche en priorité dans les dépôts DNF...");
+                if (DnfBackend::install(pkg_name, options.assumeyes)) {
+                    handled = true;
+                } else {
+                    Logger::info("Introuvable dans DNF. Recherche sur Flathub...");
+                    if (FlatpakBackend::install(pkg_name, options.assumeyes)) {
+                        handled = true;
+                    }
+                }
+            }
+            if (!handled) {
+                Logger::error("Le paquet ou l'application '" + pkg_name + "' est introuvable ni dans DNF ni sur Flathub.");
+            }
+            break;
+        }
+
         default:
             Logger::info("Commande en cours de développement...");
             break;

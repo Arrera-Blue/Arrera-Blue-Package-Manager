@@ -5,6 +5,8 @@
 #include <libdnf5/rpm/package_query.hpp>
 #include <libdnf5/base/goal.hpp>
 #include <libdnf5/base/transaction.hpp>
+#include <libdnf5/base/transaction_package.hpp>
+#include <iostream>
 #include <unistd.h>
 
 namespace abpm::dnf {
@@ -161,6 +163,68 @@ bool DnfBackend::update() {
         }
     } catch (const std::exception& e) {
         Logger::error(std::string("Erreur mise à jour DNF : ") + e.what());
+        return false;
+    }
+}
+
+bool DnfBackend::install(std::string_view package_name, bool assumeyes) {
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+        repo_sack->load_repos();
+        // 1. Vérifier si le paquet est déjà installé
+        libdnf5::rpm::PackageQuery installed_q(base);
+        installed_q.filter_installed();
+        installed_q.filter_name(std::string(package_name));
+        if (!installed_q.empty()) {
+            Logger::info(std::string("Le paquet '") + std::string(package_name) + "' est déjà installé sur le système.");
+            return true;
+        }
+        // 2. Préparer la transaction d'installation
+        libdnf5::Goal goal(base);
+        goal.add_rpm_install(std::string(package_name));
+        auto transaction = goal.resolve();
+        // Si la transaction est vide, le paquet n'a pas été trouvé dans DNF
+        if (transaction.empty()) {
+            return false;
+        }
+        // 3. Afficher ce qui va être installé (le paquet et ses dépendances)
+        auto tx_packages = transaction.get_transaction_packages();
+        std::cout << "\n--- Paquets DNF à installer (" << tx_packages.size() << ") ---\n";
+        for (const auto& tp : tx_packages) {
+            const auto& pkg = tp.get_package();
+            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")\n";
+        }
+        std::cout << "\n";
+        // 4. Demander confirmation
+        if (!assumeyes) {
+            if (!Logger::confirm("Voulez-vous procéder à l'installation ?")) {
+                Logger::info("Installation annulée.");
+                return true;
+            }
+        }
+        // 5. Vérifier les privilèges root
+        if (geteuid() != 0) {
+            Logger::warning("L'installation de paquets système DNF nécessite les privilèges administrateur.");
+            Logger::info("Relancez avec sudo : 'sudo abpm install " + std::string(package_name) + "'");
+            return true;
+        }
+        Logger::info("Téléchargement des paquets...");
+        transaction.download();
+        Logger::info("Installation des paquets RPM...");
+        auto result = transaction.run();
+        if (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
+            Logger::success("Paquet '" + std::string(package_name) + "' installé avec succès via DNF !");
+            return true;
+        } else {
+            Logger::error("Échec de l'installation DNF.");
+            return true;
+        }
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur DNF : ") + e.what());
         return false;
     }
 }

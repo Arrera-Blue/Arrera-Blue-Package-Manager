@@ -3,6 +3,7 @@
 #include <flatpak.h>
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 
 namespace abpm::flatpak {
 
@@ -206,6 +207,67 @@ bool FlatpakBackend::update() {
     }
 
     Logger::success("Mises à jour Flatpak appliquées avec succès !");
+    return true;
+}
+
+bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
+    // 1. Rechercher les correspondances sur Flathub
+    auto candidates = search(app_name);
+    if (candidates.empty()) {
+        return false;
+    }
+    // Choisir la meilleure correspondance (correspondance exacte d'ID en priorité)
+    PackageInfo chosen = candidates[0];
+    std::string needle = to_lower(app_name);
+    for (const auto& c : candidates) {
+        std::string lower_id = to_lower(c.id);
+        if (lower_id == needle || lower_id.ends_with("." + needle)) {
+            chosen = c;
+            break;
+        }
+    }
+    // 2. Afficher ce qui va être installé
+    std::cout << "\n--- Application Flatpak trouvée sur " << chosen.origin << " ---\n"
+              << " • " << chosen.id << " [" << chosen.origin << " / " << chosen.version << "]\n\n";
+    // 3. Demander confirmation
+    if (!assumeyes) {
+        if (!Logger::confirm("Voulez-vous installer cette application Flatpak ?")) {
+            Logger::info("Installation annulée.");
+            return true;
+        }
+    }
+    // 4. Lancer la transaction d'installation
+    g_autoptr(GError) err = nullptr;
+    g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
+    if (!inst) {
+        Logger::error("Impossible d'accéder au système Flatpak.");
+        return true;
+    }
+    g_autoptr(GError) tx_err = nullptr;
+    g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
+    if (!tx) {
+        Logger::error("Impossible d'initialiser la transaction Flatpak.");
+        return true;
+    }
+    // Formater le ref (ex: app/org.videolan.VLC/x86_64/stable)
+    const char* default_arch = flatpak_get_default_arch();
+    std::string full_ref = "app/" + chosen.id + "/" + (default_arch ? default_arch : "x86_64") + "/stable";
+    g_autoptr(GError) add_err = nullptr;
+    if (!flatpak_transaction_add_install(tx, chosen.origin.c_str(), full_ref.c_str(), nullptr, &add_err)) {
+        Logger::error(std::string("Erreur préparation Flatpak : ") + (add_err ? add_err->message : "inconnue"));
+        return true;
+    }
+    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
+        const char* r = flatpak_transaction_operation_get_ref(op);
+        Logger::info(std::string("Installation en cours : ") + (r ? r : ""));
+    }), nullptr);
+    Logger::info("Téléchargement et installation de l'application...");
+    g_autoptr(GError) run_err = nullptr;
+    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
+        Logger::error(std::string("Échec de l'installation Flatpak : ") + (run_err ? run_err->message : "inconnue"));
+        return true;
+    }
+    Logger::success("Application Flatpak '" + chosen.id + "' installée avec succès !");
     return true;
 }
 

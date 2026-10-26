@@ -92,6 +92,8 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
             options.filter = SourceFilter::APPIMAGE;
         } else if (arg == "--tar") {
             options.filter = SourceFilter::TAR;
+        } else if (arg == "-y" || arg == "--yes" || arg == "--assumeyes") {
+            options.assumeyes = true;
         } else if (arg == "-h" || arg == "--help") {
             options.command = CommandType::HELP;
             return options;

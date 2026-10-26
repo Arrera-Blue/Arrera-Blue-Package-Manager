@@ -41,4 +41,19 @@ void Logger::error(std::string_view message) {
               << Color::RESET << message << "\n";
 }
 
+bool Logger::confirm(std::string_view question, bool default_val) {
+    std::cout << Color::YELLOW << Color::BOLD << "[?] " 
+              << Color::RESET << question 
+              << (default_val ? " [O/n] : " : " [o/N] : ");
+    std::string response;
+    if (!std::getline(std::cin, response)) {
+        return false;
+    }
+    if (response.empty()) {
+        return default_val;
+    }
+    char first = std::tolower(response[0]);
+    return (first == 'o' || first == 'y');
+}
+
 } // namespace abpm::core

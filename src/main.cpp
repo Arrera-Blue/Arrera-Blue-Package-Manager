@@ -1,10 +1,14 @@
 #include "abpm/core/logger.hpp"
 #include "abpm/cli/cli_parser.hpp"
+#include "abpm/flatpak/flatpak_backend.hpp"
+#include <iomanip>
+#include <iostream>
 
 using abpm::core::Logger;
 using abpm::cli::CliParser;
 using abpm::cli::CommandType;
 using abpm::cli::SourceFilter;
+using abpm::flatpak::FlatpakBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -18,46 +22,28 @@ int main(int argc, char* argv[]) {
             CliParser::print_version();
             break;
 
-        case CommandType::UPDATE:
-            Logger::info("Commande reçue : 'update' (Mise à jour globale)");
-            break;
+        case CommandType::LIST: {
+            Logger::banner();
 
-        case CommandType::CHECK:
-            Logger::info("Commande reçue : 'check' (Vérification des mises à jour)");
-            break;
+            // Si filtre ALL ou FLATPAK
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
+                Logger::info("Récupération des applications Flatpak...");
+                auto apps = FlatpakBackend::list_installed();
 
-        case CommandType::INSTALL:
-            if (options.arguments.empty()) {
-                Logger::error("Argument manquant : spécifiez un paquet ou un fichier à installer.");
-                return 1;
-            }
-            Logger::info(std::string("Commande reçue : 'install' pour ") + options.arguments[0]);
-            break;
-
-        case CommandType::REMOVE:
-            if (options.arguments.empty()) {
-                Logger::error("Argument manquant : spécifiez au moins un paquet à désinstaller.");
-                return 1;
-            }
-            Logger::info("Commande reçue : 'remove'");
-            for (const auto& pkg : options.arguments) {
-                Logger::info(std::string(" - À désinstaller : ") + pkg);
+                std::cout << "\n--- Applications Flatpak (" << apps.size() << ") ---\n";
+                for (const auto& app : apps) {
+                    std::cout << " • " << std::left << std::setw(30) << app.name 
+                              << " [" << std::setw(25) << app.id << "] "
+                              << "v" << std::setw(12) << app.version 
+                              << "(" << app.origin << ")\n";
+                }
+                std::cout << "\n";
             }
             break;
-
-        case CommandType::SEARCH:
-            if (options.arguments.empty()) {
-                Logger::error("Argument manquant : spécifiez un terme de recherche.");
-                return 1;
-            }
-            Logger::info(std::string("Commande reçue : 'search' pour '") + options.arguments[0] + "'");
-            break;
-
-        case CommandType::LIST:
-            Logger::info("Commande reçue : 'list'");
-            break;
+        }
 
         default:
+            Logger::info("Commande en cours de développement...");
             break;
     }
 

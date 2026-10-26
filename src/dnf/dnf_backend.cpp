@@ -43,4 +43,35 @@ std::vector<PackageInfo> DnfBackend::list_installed() {
     return results;
 }
 
+std::vector<PackageInfo> DnfBackend::search(std::string_view term) {
+    std::vector<PackageInfo> results;
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        // Charger la configuration des dépôts système (/etc/yum.repos.d/)
+        repo_sack->create_repos_from_system_configuration();
+        // Charger les dépôts (cache local pour une recherche instantanée)
+        repo_sack->load_repos();
+        libdnf5::rpm::PackageQuery query(base);
+        // Recherche insensible à la casse (ICONTAINS)
+        query.filter_name(std::string(term), libdnf5::sack::QueryCmp::ICONTAINS);
+        results.reserve(query.size());
+        for (const auto& pkg : query) {
+            PackageInfo info;
+            info.name = pkg.get_name();
+            info.id = pkg.get_nevra();
+            info.version = pkg.get_evr();
+            info.arch = pkg.get_arch();
+            info.source = PackageSource::DNF;
+            info.origin = "dnf";
+            results.push_back(std::move(info));
+        }
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur recherche DNF : ") + e.what());
+    }
+    return results;
+}
+
 } // namespace abpm::dnf

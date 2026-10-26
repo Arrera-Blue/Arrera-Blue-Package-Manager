@@ -57,6 +57,37 @@ int main(int argc, char* argv[]) {
             }
             break;
         }
+        
+        case CommandType::SEARCH: {
+            if (options.arguments.empty()) {
+                Logger::error("Spécifiez un terme à rechercher (ex: abpm search vlc)");
+                return 1;
+            }
+            const auto& term = options.arguments[0];
+            Logger::banner();
+            Logger::info(std::string("Recherche de '") + term + "'...");
+            // 1. Recherche DNF
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
+                auto rpm_matches = DnfBackend::search(term);
+                std::cout << "\n--- Dépôts DNF / RPM (" << rpm_matches.size() << " résultat(s)) ---\n";
+                for (const auto& pkg : rpm_matches) {
+                    std::cout << " • " << std::left << std::setw(32) << pkg.name 
+                              << " " << std::setw(28) << pkg.version 
+                              << "(" << pkg.arch << ")\n";
+                }
+            }
+            // 2. Recherche Flatpak
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
+                auto flatpak_matches = FlatpakBackend::search(term);
+                std::cout << "\n--- Flathub / Flatpak (" << flatpak_matches.size() << " résultat(s)) ---\n";
+                for (const auto& app : flatpak_matches) {
+                    std::cout << " • " << std::left << std::setw(40) << app.id 
+                              << " [" << app.origin << " / " << app.version << "]\n";
+                }
+            }
+            std::cout << "\n";
+            break;
+        }
 
         default:
             Logger::info("Commande en cours de développement...");

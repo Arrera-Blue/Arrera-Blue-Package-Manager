@@ -55,3 +55,42 @@ Un module centralisé (`Logger` / `Terminal`) en C++ assure un affichage clair, 
 - `[ATTENTION]` *(en jaune)* : Pour les avertissements sans blocage (*ex: « Flathub ne répond pas, bascule sur le cache local... »*).
 - `[ERREUR]` *(en rouge)* : Pour les erreurs bloquantes avec message explicite (*ex: « Erreur : Le paquet 'xyz' est introuvable ni dans DNF ni sur Flathub »*).
 
+
+## Compilation et Packaging RPM (Fedora Copr)
+
+### 1. Installation des dépendances
+
+Le script d'installation configure automatiquement les bibliothèques C++ et les outils de packaging RPM :
+```bash
+./install-dev-deps.sh
+```
+
+### 2. Compilation locale avec CMake
+
+```bash
+cmake -B build -S .
+cmake --build build -j$(nproc)
+./build/abpm --version
+```
+
+### 3. Génération automatique du RPM et publication sur Copr
+
+Le script `build-rpm.sh` automatise la création de l'arborescence `~/rpmbuild`, l'archive source tarball et les fichiers `.rpm` et `.src.rpm` :
+
+```bash
+# Compilation complète locale (génère le SRPM et le binaire RPM)
+./build-rpm.sh
+
+# Générer uniquement le paquet source (.src.rpm) pour Copr
+./build-rpm.sh --srpm-only
+
+# Générer le SRPM et l'envoyer directement sur Fedora Copr
+./build-rpm.sh --copr <utilisateur>/<projet>
+```
+
+Une fois publié sur Copr, l'installation sur Arrera Blue OS / Fedora se fait simplement :
+```bash
+sudo dnf copr enable <utilisateur>/<projet>
+sudo dnf install abpm
+```
+

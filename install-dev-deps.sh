@@ -33,7 +33,7 @@ if ! command -v dnf &>/dev/null; then
     exit 1
 fi
 
-# Liste des paquets requis pour le développement C++ natif de abpm
+# Liste des paquets requis pour le développement C++ natif et le packaging RPM de abpm
 DEV_PACKAGES=(
     gcc-c++
     cmake
@@ -43,6 +43,11 @@ DEV_PACKAGES=(
     libdnf5-devel
     flatpak-devel
     glib2-devel
+    libarchive-devel
+    fuse-libs
+    rpm-build
+    rpmdevtools
+    copr-cli
 )
 
 echo -e "${YELLOW}[*] Paquets à installer :${RESET} ${DEV_PACKAGES[*]}"

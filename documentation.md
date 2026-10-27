@@ -72,6 +72,21 @@ cmake --build build -j$(nproc)
 ./build/abpm --version
 ```
 
+### Packaging RPM & Deploying to Fedora Copr
+
+`abpm` includes a dedicated automation script (`build-rpm.sh`) to generate source archives, SRPMs, and binary RPM packages conforming to the official `abpm.spec` file:
+
+```bash
+# Full local build (generates both SRPM and binary RPM)
+./build-rpm.sh
+
+# Build SRPM only (ready for cloud submission)
+./build-rpm.sh --srpm-only
+
+# Build and immediately trigger build on Fedora Copr
+./build-rpm.sh --copr <username>/<project>
+```
+
 ---
 
 ## Command Reference

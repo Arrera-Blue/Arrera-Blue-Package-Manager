@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(abpm
-    VERSION 0.1.0
+    VERSION 2026.1.0
     DESCRIPTION "Arrera Blue Package Manager"
     LANGUAGES CXX
 )
@@ -46,3 +46,7 @@ target_link_libraries(abpm PRIVATE
     PkgConfig::GLIB2
     PkgConfig::LIBARCHIVE
 )
+
+# Installation standard GNU (pour le packaging RPM et make install)
+include(GNUInstallDirs)
+install(TARGETS abpm DESTINATION ${CMAKE_INSTALL_BINDIR})

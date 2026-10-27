@@ -28,7 +28,7 @@ void CliParser::print_help() {
               << "  --flatpak               Cibler uniquement Flatpak / Flathub\n"
               << "  --rpm <FICHIER>         Installer / lister des paquets RPM locaux\n"
               << "  --appimage <FICHIER>    Installer / lister des applications AppImage\n"
-              << "  --tar <FICHIER>         Installer / lister des paquets tar.xz\n\n"
+              << "  --tar <FICHIER>         Installer / lister des applications en archives (tar, zip)\n\n"
               << "OPTIONS GENERALES:\n"
               << "  -y, --yes               Repondre oui a toutes les confirmations\n"
               << "  -h, --help              Affiche cette aide\n"

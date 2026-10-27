@@ -29,6 +29,7 @@ struct AppImageRecord {
 // Récupération des chemins selon le contexte (root vs utilisateur)
 struct AppImagePaths {
     fs::path apps_dir;
+    fs::path icons_dir;
     fs::path bin_dir;
     fs::path desktop_dir;
     fs::path manifest_dir;
@@ -42,6 +43,7 @@ AppImagePaths get_paths(bool force_system = false) {
 
     if (p.is_system) {
         p.apps_dir = "/opt/applications";
+        p.icons_dir = p.apps_dir / ".icons";
         p.bin_dir = "/usr/local/bin";
         p.desktop_dir = "/usr/share/applications";
         p.manifest_dir = "/var/lib/abpm";
@@ -50,6 +52,7 @@ AppImagePaths get_paths(bool force_system = false) {
         const char* home = std::getenv("HOME");
         std::string home_str = home ? home : "";
         p.apps_dir = home_str + "/Applications";
+        p.icons_dir = p.apps_dir / ".icons";
         p.bin_dir = home_str + "/.local/bin";
         p.desktop_dir = home_str + "/.local/share/applications";
         p.manifest_dir = home_str + "/.local/share/abpm";
@@ -164,9 +167,83 @@ void save_manifest(const fs::path& manifest_path, const std::vector<AppImageReco
     file << "]\n";
 }
 
+// Extrait l'icône embarquée dans l'AppImage
+fs::path extract_appimage_icon(const fs::path& appimage_path, const fs::path& icons_dir, const std::string& app_name) {
+    fs::create_directories(icons_dir);
+    fs::path temp_dir = fs::temp_directory_path() / ("abpm_icon_" + app_name);
+    try { fs::remove_all(temp_dir); } catch (...) {}
+    fs::create_directories(temp_dir);
+
+    std::string base_cmd = "cd \"" + temp_dir.string() + "\" && \"" + appimage_path.string() + "\"";
+
+    // 1. Extraction ciblée standard Type 2 (.DirIcon, *.png, *.svg)
+    std::system((base_cmd + " --appimage-extract \".DirIcon*\" >/dev/null 2>&1").c_str());
+    std::system((base_cmd + " --appimage-extract \"*.png\" >/dev/null 2>&1").c_str());
+    std::system((base_cmd + " --appimage-extract \"*.svg\" >/dev/null 2>&1").c_str());
+    std::system((base_cmd + " --appimage-extract \"usr/share/icons/*\" >/dev/null 2>&1").c_str());
+
+    fs::path sq_root = temp_dir / "squashfs-root";
+    if (!fs::exists(sq_root)) {
+        // Fallback complet pour les AppImages plus anciennes ne gérant pas les motifs
+        std::system((base_cmd + " --appimage-extract >/dev/null 2>&1").c_str());
+    }
+
+    fs::path found_icon;
+    std::error_code ec;
+
+    if (fs::exists(sq_root, ec)) {
+        // A. Priorité 1 : .DirIcon officiel (spécification AppImage)
+        fs::path dir_icon = sq_root / ".DirIcon";
+        if (fs::exists(dir_icon, ec) && fs::is_regular_file(dir_icon, ec)) {
+            found_icon = dir_icon;
+        }
+
+        // B. Priorité 2 : Recherche récursive d'un .png ou .svg
+        if (found_icon.empty()) {
+            for (const auto& entry : fs::recursive_directory_iterator(sq_root, fs::directory_options::skip_permission_denied, ec)) {
+                if (ec) break;
+                if (!entry.is_regular_file(ec)) continue;
+                std::string ext = entry.path().extension().string();
+                if (ext == ".png" || ext == ".svg") {
+                    std::string fname = entry.path().filename().string();
+                    std::transform(fname.begin(), fname.end(), fname.begin(), [](unsigned char c) { return std::tolower(c); });
+                    if (fname.find(app_name) != std::string::npos || fname.find("icon") != std::string::npos) {
+                        found_icon = entry.path();
+                        break;
+                    }
+                    if (found_icon.empty()) {
+                        found_icon = entry.path();
+                    }
+                }
+            }
+        }
+    }
+
+    fs::path result_icon;
+    if (!found_icon.empty()) {
+        std::string ext = found_icon.extension().string();
+        if (ext.empty() || ext == ".DirIcon") ext = ".png";
+
+        std::string safe_name = app_name;
+        std::replace(safe_name.begin(), safe_name.end(), ' ', '-');
+        fs::path dest = icons_dir / (safe_name + ext);
+
+        try {
+            fs::copy_file(found_icon, dest, fs::copy_options::overwrite_existing);
+            result_icon = dest;
+        } catch (...) {}
+    }
+
+    // Nettoyage complet et sécurisé du dossier temporaire
+    std::string clean_cmd = "rm -rf \"" + temp_dir.string() + "\" >/dev/null 2>&1";
+    std::system(clean_cmd.c_str());
+
+    return result_icon;
+}
+
 } // anonymous namespace
 
-bool AppImageBackend::install(const std::string& file_path, bool assumeyes) {
+bool AppImageBackend::install(const std::string& file_path, bool assumeyes, const std::string& custom_icon) {
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
         Logger::error("Fichier AppImage introuvable : '" + file_path + "'");
         return false;
@@ -227,14 +304,35 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes) {
         fs::create_symlink(target_appimage, target_symlink);
         Logger::info("Lien symbolique créé : " + target_symlink.string());
 
-        // 5. Créer le fichier .desktop pour le bureau
+        // 5. Extraction et configuration de l'icône
+        fs::create_directories(paths.icons_dir);
+        fs::path extracted_icon;
+        if (!custom_icon.empty() && fs::exists(custom_icon) && fs::is_regular_file(custom_icon)) {
+            std::string ext = fs::path(custom_icon).extension().string();
+            std::string safe_name = app_name;
+            std::replace(safe_name.begin(), safe_name.end(), ' ', '-');
+            fs::path dest = paths.icons_dir / (safe_name + ext);
+            try {
+                fs::copy_file(custom_icon, dest, fs::copy_options::overwrite_existing);
+                extracted_icon = dest;
+            } catch (...) {
+                extracted_icon = custom_icon;
+            }
+        } else {
+            extracted_icon = extract_appimage_icon(target_appimage, paths.icons_dir, app_name);
+        }
+        std::string icon_str = !extracted_icon.empty() ? extracted_icon.string() : "application-x-executable";
+        if (!extracted_icon.empty()) {
+            Logger::info("Icône configurée : " + extracted_icon.string());
+        }
+        // 6. Créer le fichier .desktop pour le bureau
         fs::path target_desktop = paths.desktop_dir / (app_name + ".desktop");
         {
             std::ofstream df(target_desktop);
             df << "[Desktop Entry]\n";
             df << "Name=" << app_name << "\n";
             df << "Exec=" << target_appimage.string() << "\n";
-            df << "Icon=" << app_name << "\n";
+            df << "Icon=" << icon_str << "\n";
             df << "Type=Application\n";
             df << "Terminal=false\n";
             df << "Categories=Utility;Application;\n";
@@ -384,6 +482,77 @@ bool AppImageBackend::remove(const std::vector<std::string>& package_names) {
     }
 
     return all_ok;
+}
+
+bool AppImageBackend::set_icon(const std::string& name, const std::string& icon_path) {
+    if (!fs::exists(icon_path)) {
+        Logger::error("Fichier d'icône introuvable : " + icon_path);
+        return false;
+    }
+
+    auto user_paths = get_paths(false);
+    auto user_records = load_manifest(user_paths.manifest_file, false);
+    auto uit = std::find_if(user_records.begin(), user_records.end(),
+        [&](const AppImageRecord& r) { return r.name == name; });
+
+    bool is_system = false;
+    fs::path desktop_path;
+    fs::path icons_dir;
+
+    if (uit != user_records.end()) {
+        desktop_path = uit->desktop_path;
+        icons_dir = user_paths.icons_dir;
+    } else {
+        auto sys_paths = get_paths(true);
+        auto sys_records = load_manifest(sys_paths.manifest_file, true);
+        auto sit = std::find_if(sys_records.begin(), sys_records.end(),
+            [&](const AppImageRecord& r) { return r.name == name; });
+        if (sit != sys_records.end()) {
+            is_system = true;
+            desktop_path = sit->desktop_path;
+            icons_dir = sys_paths.icons_dir;
+        } else {
+            return false;
+        }
+    }
+
+    if (is_system && geteuid() != 0) {
+        Logger::warning("L'application '" + name + "' est installée au niveau système.");
+        Logger::info("Relancez avec sudo : 'sudo abpm set-icon " + name + " " + icon_path + "'");
+        return false;
+    }
+
+    try {
+        fs::create_directories(icons_dir);
+        std::string ext = fs::path(icon_path).extension().string();
+        std::string safe_name = name;
+        std::replace(safe_name.begin(), safe_name.end(), ' ', '-');
+        fs::path dest_icon = icons_dir / (safe_name + ext);
+        fs::copy_file(icon_path, dest_icon, fs::copy_options::overwrite_existing);
+
+        // Mettre à jour le fichier .desktop
+        if (fs::exists(desktop_path)) {
+            std::ifstream df_in(desktop_path);
+            std::string line;
+            std::vector<std::string> lines;
+            while (std::getline(df_in, line)) {
+                if (line.starts_with("Icon=")) {
+                    lines.push_back("Icon=" + dest_icon.string());
+                } else {
+                    lines.push_back(line);
+                }
+            }
+            std::ofstream df_out(desktop_path);
+            for (const auto& l : lines) df_out << l << "\n";
+        }
+
+        Logger::success("Icône de l'AppImage '" + name + "' mise à jour avec succès !");
+        Logger::info("Nouvelle icône : " + dest_icon.string());
+        return true;
+    } catch (const std::exception& e) {
+        Logger::error("Erreur lors du changement d'icône : " + std::string(e.what()));
+        return false;
+    }
 }
 
 } // namespace abpm::appimage

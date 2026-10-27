@@ -256,13 +256,13 @@ int main(int argc, char* argv[]) {
             // Cas 0.5 : Installation d'une AppImage (--appimage)
             else if (options.filter == SourceFilter::APPIMAGE) {
                 Logger::info("Installation du fichier AppImage : " + pkg_name);
-                AppImageBackend::install(pkg_name, options.assumeyes);
+                AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon);
                 handled = true;
             }
             // Cas 0.8 : Installation d'une archive Tar / Zip (--tar)
             else if (options.filter == SourceFilter::TAR) {
                 Logger::info("Installation du fichier d'archive : " + pkg_name);
-                ArchiveBackend::install(pkg_name, options.assumeyes);
+                ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon);
                 handled = true;
             }
             // Cas 1 : Forcer DNF (--dnf)
@@ -402,6 +402,33 @@ int main(int argc, char* argv[]) {
             }
             if (dnf_ok && flatpak_ok && appimage_ok && archive_ok) {
                 Logger::success("Toutes les désinstallations ont été effectuées avec succès !");
+            }
+            break;
+        }
+
+        case CommandType::SET_ICON: {
+            if (options.arguments.size() < 2) {
+                Logger::error("Utilisation : abpm set-icon <nom_application> <chemin_nouvelle_icone>");
+                return 1;
+            }
+            const auto& app_name = options.arguments[0];
+            const auto& icon_path = options.arguments[1];
+
+            Logger::banner();
+            Logger::info("Mise à jour de l'icône pour '" + app_name + "'...");
+
+            bool updated = false;
+            if (AppImageBackend::is_installed(app_name)) {
+                updated = AppImageBackend::set_icon(app_name, icon_path);
+            } else if (ArchiveBackend::is_installed(app_name)) {
+                updated = ArchiveBackend::set_icon(app_name, icon_path);
+            } else {
+                Logger::error("Application '" + app_name + "' introuvable parmi les AppImages et Archives installées.");
+                return 1;
+            }
+
+            if (!updated) {
+                return 1;
             }
             break;
         }

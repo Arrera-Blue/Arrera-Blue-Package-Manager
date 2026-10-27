@@ -14,6 +14,7 @@ enum class CommandType {
     SEARCH,
     LIST,
     HELP,
+    SET_ICON,
     VERSION
 };
 
@@ -30,7 +31,8 @@ struct CliOptions {
     CommandType command = CommandType::NONE;
     SourceFilter filter = SourceFilter::ALL;
     std::vector<std::string> arguments;
-    bool assumeyes = false; // Option -y / --yes
+    std::string custom_icon; // Option --icon <FICHIER>
+    bool assumeyes = false;  // Option -y / --yes
 };
 
 class CliParser {

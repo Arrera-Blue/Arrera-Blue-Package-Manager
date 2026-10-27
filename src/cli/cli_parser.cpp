@@ -22,13 +22,15 @@ void CliParser::print_help() {
               << "  install [OPTIONS] <PKG> Installe un paquet (priorite DNF puis Flathub)\n"
               << "  remove <PKG...>         Desinstalle un ou plusieurs paquets\n"
               << "  search [OPTIONS] <PKG>  Recherche un paquet disponible\n"
-              << "  list [OPTIONS]          Liste les paquets installes\n\n"
+              << "  list [OPTIONS]          Liste les paquets installes\n"
+              << "  set-icon <PKG> <IMAGE>  Modifie l'icone d'une application installee\n\n"
               << "OPTIONS DE SOURCE / FORMAT:\n"
               << "  --dnf                   Cibler uniquement DNF / RPM\n"
               << "  --flatpak               Cibler uniquement Flatpak / Flathub\n"
               << "  --rpm <FICHIER>         Installer / lister des paquets RPM locaux\n"
               << "  --appimage <FICHIER>    Installer / lister des applications AppImage\n"
-              << "  --tar <FICHIER>         Installer / lister des applications en archives (tar, zip)\n\n"
+              << "  --tar <FICHIER>         Installer / lister des applications en archives (tar, zip)\n"
+              << "  --icon <FICHIER>        Definir l'icone a utiliser lors de l'installation\n\n"
               << "OPTIONS GENERALES:\n"
               << "  -y, --yes               Repondre oui a toutes les confirmations\n"
               << "  -h, --help              Affiche cette aide\n"
@@ -73,6 +75,8 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
         options.command = CommandType::SEARCH;
     } else if (first_arg == "list") {
         options.command = CommandType::LIST;
+    } else if (first_arg == "set-icon" || first_arg == "icon") {
+        options.command = CommandType::SET_ICON;
     } else {
         Logger::error(std::string("Commande inconnue : '") + std::string(first_arg) + "'");
         options.command = CommandType::HELP;
@@ -93,6 +97,14 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
             options.filter = SourceFilter::APPIMAGE;
         } else if (arg == "--tar") {
             options.filter = SourceFilter::TAR;
+        } else if (arg.starts_with("--icon=")) {
+            options.custom_icon = arg.substr(7);
+        } else if (arg == "--icon") {
+            if (i + 1 < args.size()) {
+                options.custom_icon = args[++i];
+            } else {
+                Logger::error("L'option --icon requiert un chemin de fichier.");
+            }
         } else if (arg == "-y" || arg == "--yes" || arg == "--assumeyes") {
             options.assumeyes = true;
         } else if (arg == "-h" || arg == "--help") {

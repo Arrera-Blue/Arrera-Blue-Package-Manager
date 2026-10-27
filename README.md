@@ -13,8 +13,13 @@
 - `install --dnf [PAQUET]` : Lance le programme d'installation en appelant uniquement DNF.
 - `install --flatpak [PAQUET]` : Lance le programme d'installation en appelant uniquement Flatpak.
 - `install --rpm [FICHIER_RPM]` : Installation d'un paquet RPM local (comme DNF sous Fedora).
-- `install --appimage [FICHIER_APPIMAGE]` : Installation et intégration d'une application au format AppImage.
-- `install --tar [FICHIER_TAR_XZ]` : Installation d'une application distribuée sous forme d'archive tar (en copiant son contenu dans un dossier spécifique et en créant le fichier `.desktop` adéquat pour la lancer et la rendre désinstallable). Permet également de choisir si on l'installe pour l'utilisateur ou pour le système.
+- `install --appimage [FICHIER_APPIMAGE]` : Installation et intégration d'une application au format AppImage (avec extraction automatique de l'icône dans `.icons/`).
+- `install --tar [FICHIER_ARCHIVE]` : Installation d'une application distribuée sous forme d'archive tar ou zip (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar`, `.zip`). Détecte les binaires, recherche les icônes PNG candidates et propose une sélection interactive si plusieurs icônes sont présentes.
+- `install [OPTIONS] --icon [FICHIER_IMAGE] [APPLICATION]` : Permet de spécifier directement une icône lors de l'installation d'une archive ou d'une AppImage sans passer par la détection automatique.
+
+### Set-Icon
+
+- `set-icon [PAQUET] [FICHIER_IMAGE]` : Modifie l'icône d'une application déjà installée (AppImage ou Archive). Copie l'image dans le dossier `.icons/` et met à jour automatiquement le ou les fichiers `.desktop` associés. (Alias : `icon`).
 
 ### Remove
 
@@ -33,8 +38,13 @@
 - `list --flatpak` : Liste tous les paquets Flatpak installés.
 - `list --rpm` : Liste tous les paquets installés via un fichier RPM local.
 - `list --appimage` : Liste toutes les applications installées au format AppImage.
-- `list --tar` : Liste toutes les applications installées via une archive tar.xz.
+- `list --tar` : Liste toutes les applications installées via une archive (tar, zip).
 
+### Options Générales
+
+- `-y`, `--yes` : Répond automatiquement oui à toutes les confirmations d'installation/désinstallation et sélectionne l'icône recommandée pour les archives.
+- `-h`, `--help` : Affiche l'aide de l'outil et les commandes disponibles.
+- `-v`, `--version` : Affiche la version d'abpm et les technologies sous-jacentes (libdnf5, libflatpak).
 
 ## Convention d'Affichage et Messages
 

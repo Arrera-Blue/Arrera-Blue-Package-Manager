@@ -2,6 +2,7 @@
 #include "abpm/cli/cli_parser.hpp"
 #include "abpm/flatpak/flatpak_backend.hpp"
 #include "abpm/dnf/dnf_backend.hpp"
+#include "abpm/appimage/appimage_backend.hpp"
 #include <iomanip>
 #include <iostream>
 
@@ -11,6 +12,7 @@ using abpm::cli::CommandType;
 using abpm::cli::SourceFilter;
 using abpm::flatpak::FlatpakBackend;
 using abpm::dnf::DnfBackend;
+using abpm::appimage::AppImageBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -63,6 +65,18 @@ int main(int argc, char* argv[]) {
                     std::cout << " • " << std::left << std::setw(30) << pkg.name 
                               << " " << std::setw(32) << pkg.version 
                               << "(" << pkg.arch << ")\n";
+                }
+                std::cout << "\n";
+            }
+            // 3. AppImage (si filtre ALL ou APPIMAGE)
+            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::APPIMAGE) {
+                Logger::info("Récupération des applications AppImage...");
+                auto appimages = AppImageBackend::list_installed();
+                std::cout << "\n--- Applications AppImage (" << appimages.size() << ") ---\n";
+                for (const auto& app : appimages) {
+                    std::cout << " • " << std::left << std::setw(30) << app.name 
+                              << " " << std::setw(20) << ("v" + app.version)
+                              << "[" << app.origin << "]\n";
                 }
                 std::cout << "\n";
             }
@@ -225,6 +239,12 @@ int main(int argc, char* argv[]) {
                 DnfBackend::install_local_rpm(pkg_name, options.assumeyes);
                 handled = true;
             }
+            // Cas 0.5 : Installation d'une AppImage (--appimage)
+            else if (options.filter == SourceFilter::APPIMAGE) {
+                Logger::info("Installation du fichier AppImage : " + pkg_name);
+                AppImageBackend::install(pkg_name, options.assumeyes);
+                handled = true;
+            }
             // Cas 1 : Forcer DNF (--dnf)
             else if (options.filter == SourceFilter::DNF) {
                 Logger::info("Recherche dans les dépôts DNF...");
@@ -266,33 +286,45 @@ int main(int argc, char* argv[]) {
             }
             Logger::banner();
             Logger::info("Analyse des paquets à désinstaller...");
+            std::vector<std::string> appimage_to_remove;
             std::vector<std::string> dnf_to_remove;
             std::vector<std::string> flatpak_to_remove;
             std::vector<std::string> not_found;
             for (const auto& pkg : options.arguments) {
-                // 1. Vérifier si c'est une application Flatpak
+                // 1. Vérifier si c'est une application AppImage
+                if (AppImageBackend::is_installed(pkg)) {
+                    appimage_to_remove.push_back(pkg);
+                    continue;
+                }
+                // 2. Vérifier si c'est une application Flatpak
                 std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg);
                 if (!flatpak_ref.empty()) {
                     flatpak_to_remove.push_back(flatpak_ref);
                     continue;
                 }
-                // 2. Vérifier si c'est un paquet DNF
+                // 3. Vérifier si c'est un paquet DNF
                 if (DnfBackend::is_installed(pkg)) {
                     dnf_to_remove.push_back(pkg);
                     continue;
                 }
-                // 3. Introuvable
+                // 4. Introuvable
                 not_found.push_back(pkg);
             }
             for (const auto& missing : not_found) {
-                Logger::warning("Le paquet '" + missing + "' n'est pas installé sur le système.");
+                Logger::warning("Le paquet ou l'application '" + missing + "' n'est pas installé sur le système.");
             }
-            size_t total_found = dnf_to_remove.size() + flatpak_to_remove.size();
+            size_t total_found = appimage_to_remove.size() + dnf_to_remove.size() + flatpak_to_remove.size();
             if (total_found == 0) {
                 Logger::error("Aucun des paquets spécifiés n'est actuellement installé.");
                 break;
             }
             // Récapitulatif
+            if (!appimage_to_remove.empty()) {
+                std::cout << "\n--- Applications AppImage à désinstaller (" << appimage_to_remove.size() << ") ---\n";
+                for (const auto& app : appimage_to_remove) {
+                    std::cout << " • " << app << "\n";
+                }
+            }
             if (!dnf_to_remove.empty()) {
                 std::cout << "\n--- Paquets DNF à désinstaller (" << dnf_to_remove.size() << ") ---\n";
                 for (const auto& p : dnf_to_remove) {
@@ -314,8 +346,12 @@ int main(int argc, char* argv[]) {
                 }
             }
             // Exécution
+            bool appimage_ok = true;
             bool dnf_ok = true;
             bool flatpak_ok = true;
+            if (!appimage_to_remove.empty()) {
+                appimage_ok = AppImageBackend::remove(appimage_to_remove);
+            }
             if (!dnf_to_remove.empty()) {
                 dnf_ok = DnfBackend::remove(dnf_to_remove);
                 if (dnf_ok) {
@@ -328,7 +364,7 @@ int main(int argc, char* argv[]) {
                     Logger::success("Applications Flatpak désinstallées avec succès !");
                 }
             }
-            if (dnf_ok && flatpak_ok) {
+            if (dnf_ok && flatpak_ok && appimage_ok) {
                 Logger::success("Toutes les désinstallations ont été effectuées avec succès !");
             }
             break;

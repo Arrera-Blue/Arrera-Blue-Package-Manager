@@ -29,6 +29,7 @@ add_executable(abpm
     src/cli/cli_parser.cpp
     src/flatpak/flatpak_backend.cpp
     src/dnf/dnf_backend.cpp
+    src/appimage/appimage_backend.cpp
 )
 
 # Dossier des en-têtes (#include <abpm/...>)

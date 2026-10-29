@@ -1,6 +1,6 @@
 Name:           abpm
 Version:        2026.1.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
 
@@ -76,6 +76,11 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Thu Oct 29 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.1-2
+- Intégration complète de la commande discover avec support DNF AppStream et Flathub.
+- Prise en charge des filtres --dnf et --flatpak.
+- Inclusion des dépendances libappstream, libcurl et json-glib.
+
 * Thu Oct 29 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.1-1
 - Ajout de la commande discover pour Blue Hub avec requêtage Flathub trending.
 - Résolution prioritaire DNF5 et fallback Flatpak.

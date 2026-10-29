@@ -4,6 +4,7 @@
 #include "abpm/dnf/dnf_backend.hpp"
 #include "abpm/appimage/appimage_backend.hpp"
 #include "abpm/archive/archive_backend.hpp"
+#include "abpm/discover/discover_backend.hpp"
 #include <iomanip>
 #include <iostream>
 
@@ -15,6 +16,7 @@ using abpm::flatpak::FlatpakBackend;
 using abpm::dnf::DnfBackend;
 using abpm::appimage::AppImageBackend;
 using abpm::archive::ArchiveBackend;
+using abpm::discover::DiscoverBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -429,6 +431,43 @@ int main(int argc, char* argv[]) {
 
             if (!updated) {
                 return 1;
+            }
+            break;
+        }
+
+                case CommandType::DISCOVER: {
+            auto apps = DiscoverBackend::discover(options.filter, options.discover_page, options.discover_per_page);
+
+            if (options.json_output) {
+                // Sortie JSON brute sur stdout (pour Blue Hub)
+                std::cout << DiscoverBackend::to_json(apps);
+            } else {
+                Logger::banner();
+                std::string filter_str = "Toutes sources (DNF + Flatpak)";
+                if (options.filter == SourceFilter::DNF) filter_str = "DNF uniquement";
+                else if (options.filter == SourceFilter::FLATPAK) filter_str = "Flathub / Flatpak uniquement";
+
+                std::cout << "Applications populaires & tendances (" << filter_str 
+                          << " - Page " << options.discover_page << ", " << options.discover_per_page << " par page) :\n\n";
+
+                if (apps.empty()) {
+                    Logger::warning("Aucune application trouvée pour ces critères.");
+                    break;
+                }
+
+                for (const auto& app : apps) {
+                    std::cout << " • " << "\033[1m" << app.name << "\033[0m"
+                              << " [" << (app.source == "dnf" ? "\033[1;36mdnf" : "\033[1;34mflatpak")
+                              << "\033[0m : " << app.package << "]\n";
+                    if (!app.summary.empty()) {
+                        std::cout << "   " << app.summary << "\n";
+                    }
+                }
+
+                std::cout << "\nPour installer une application : abpm install <paquet>\n";
+                std::string extra_flag = (options.filter == SourceFilter::DNF ? " --dnf" : (options.filter == SourceFilter::FLATPAK ? " --flatpak" : ""));
+                std::cout << "Page suivante                  : abpm discover" << extra_flag 
+                          << " --page " << (options.discover_page + 1) << " --per-page " << options.discover_per_page << "\n\n";
             }
             break;
         }

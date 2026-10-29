@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(abpm
-    VERSION 2026.1.0
+    VERSION 2026.1.1
     DESCRIPTION "Arrera Blue Package Manager"
     LANGUAGES CXX
 )
@@ -17,11 +17,14 @@ add_compile_options(-Wall -Wextra -pedantic)
 # Recherche des dépendances via pkg-config
 find_package(PkgConfig REQUIRED)
 
-# Détection de libdnf5, libflatpak et libarchive
+# Détection de libdnf5, libflatpak, libarchive, libcurl et json-glib
 pkg_check_modules(LIBDNF5 REQUIRED IMPORTED_TARGET libdnf5)
 pkg_check_modules(FLATPAK REQUIRED IMPORTED_TARGET flatpak)
 pkg_check_modules(GLIB2 REQUIRED IMPORTED_TARGET glib-2.0 gio-2.0)
 pkg_check_modules(LIBARCHIVE REQUIRED IMPORTED_TARGET libarchive)
+pkg_check_modules(LIBCURL REQUIRED IMPORTED_TARGET libcurl)
+pkg_check_modules(JSON_GLIB REQUIRED IMPORTED_TARGET json-glib-1.0)
+pkg_check_modules(APPSTREAM REQUIRED IMPORTED_TARGET appstream)
 
 # Définition de l'exécutable abpm
 add_executable(abpm
@@ -32,6 +35,7 @@ add_executable(abpm
     src/dnf/dnf_backend.cpp
     src/appimage/appimage_backend.cpp
     src/archive/archive_backend.cpp
+    src/discover/discover_backend.cpp
 )
 
 # Dossier des en-têtes (#include <abpm/...>)
@@ -45,6 +49,9 @@ target_link_libraries(abpm PRIVATE
     PkgConfig::FLATPAK
     PkgConfig::GLIB2
     PkgConfig::LIBARCHIVE
+    PkgConfig::LIBCURL
+    PkgConfig::JSON_GLIB
+    PkgConfig::APPSTREAM
 )
 
 # Installation standard GNU (pour le packaging RPM et make install)

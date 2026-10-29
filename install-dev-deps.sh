@@ -44,10 +44,13 @@ DEV_PACKAGES=(
     flatpak-devel
     glib2-devel
     libarchive-devel
+    libcurl-devel
+    json-glib-devel
     fuse-libs
     rpm-build
     rpmdevtools
     copr-cli
+    appstream-devel
 )
 
 echo -e "${YELLOW}[*] Paquets à installer :${RESET} ${DEV_PACKAGES[*]}"

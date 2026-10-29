@@ -15,6 +15,7 @@ enum class CommandType {
     LIST,
     HELP,
     SET_ICON,
+    DISCOVER,
     VERSION
 };
 
@@ -31,8 +32,13 @@ struct CliOptions {
     CommandType command = CommandType::NONE;
     SourceFilter filter = SourceFilter::ALL;
     std::vector<std::string> arguments;
-    std::string custom_icon; // Option --icon <FICHIER>
-    bool assumeyes = false;  // Option -y / --yes
+    std::string custom_icon;  // Option --icon <FICHIER>
+    bool assumeyes = false;   // Option -y / --yes
+
+    // Options spécifiques à discover et aux sorties structurées
+    int discover_page = 1;     // Option --page <N>
+    int discover_per_page = 6; // Option --per-page <N>
+    bool json_output = false;  // Option --json
 };
 
 class CliParser {

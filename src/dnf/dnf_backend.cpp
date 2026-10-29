@@ -322,6 +322,37 @@ bool DnfBackend::is_installed(std::string_view name) {
         return false;
     }
 }
+
+bool DnfBackend::is_available(std::string_view package_name) {
+    if (package_name.empty()) return false;
+    auto available = get_available_packages({std::string(package_name)});
+    return !available.empty();
+}
+
+std::vector<std::string> DnfBackend::get_available_packages(const std::vector<std::string>& names) {
+    std::vector<std::string> found;
+    if (names.empty()) return found;
+
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+        repo_sack->load_repos();
+
+        for (const auto& name : names) {
+            libdnf5::rpm::PackageQuery q(base);
+            q.filter_name(name);
+            if (!q.empty()) {
+                found.push_back(name);
+            }
+        }
+    } catch (...) {}
+
+    return found;
+}
+
 bool DnfBackend::remove(const std::vector<std::string>& package_names) {
     if (package_names.empty()) return true;
     try {

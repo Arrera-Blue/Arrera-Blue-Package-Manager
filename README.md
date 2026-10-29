@@ -31,6 +31,15 @@
 - `search --dnf [PAQUET]` : Cherche les paquets disponibles uniquement sur DNF.
 - `search --flatpak [PAQUET]` : Cherche les paquets disponibles uniquement sur Flathub.
 
+### Discover
+
+- `discover` : Découvre et affiche les applications populaires et tendances du moment en mode mixte (50% paquets DNF via AppStream et 50% tendances Flathub).
+- `discover --dnf` : Découvre uniquement les applications graphiques disponibles sur DNF via le catalogue AppStream.
+- `discover --flatpak` : Découvre uniquement les applications populaires et tendances de Flathub.
+- `discover --page [N]` : Spécifie le numéro de la page à afficher (par défaut : `1`).
+- `discover --per-page [N]` : Spécifie le nombre d'applications retournées par page (par défaut : `6`).
+- `discover --json` : Sortie brute en JSON standardisé sur `stdout` sans styles ANSI pour intégration directe dans **Blue Hub** (Software Center d'Arrera Blue OS).
+
 ### List
 
 - `list` : Liste tous les paquets Flatpak et DNF installés.

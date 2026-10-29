@@ -15,8 +15,9 @@ It seamlessly consolidates system packages (**DNF/RPM** via `libdnf5`), sandboxe
    - [install](#2-installation)
    - [remove](#3-uninstallation)
    - [search](#4-search)
-   - [list](#5-listing-installed-packages)
-   - [set-icon](#6-icon-management)
+   - [discover](#5-discover-trending-applications)
+   - [list](#6-listing-installed-packages)
+   - [set-icon](#7-icon-management)
 4. [Standalone Application Storage & Integration](#standalone-application-storage--integration)
    - [User Mode vs. System (Root) Mode](#user-mode-vs-system-mode)
    - [AppImage Integration](#appimage-integration)
@@ -34,6 +35,7 @@ It seamlessly consolidates system packages (**DNF/RPM** via `libdnf5`), sandboxe
   - Uses `libdnf5` directly for fast transactional package queries, local RPM installations, GPG validation, and system updates.
   - Uses `libflatpak` and GLib/GIO natively for managing Flathub applications, runtimes, and local refs.
   - Uses `libarchive` for fast, streaming in-memory extraction of compressed archives (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar.zst`, `.tar`, `.zip`).
+  - Uses `libcurl` and `json-glib` for querying remote app catalogs and trending collections.
 - **Unified Transaction Model:**
   - `install` and `remove` commands can resolve multiple packages across all package types in a single execution.
   - Multi-package uninstallation intelligently routes each target to its respective backend (Archive, AppImage, Flatpak, or DNF).
@@ -56,6 +58,8 @@ sudo dnf install -y \
     flatpak-devel \
     glib2-devel \
     libarchive-devel \
+    libcurl-devel \
+    json-glib-devel \
     fuse-libs
 ```
 
@@ -168,7 +172,71 @@ abpm search --flatpak kdenlive
 
 ---
 
-### 5. Listing Installed Packages
+### 5. Discover (Trending Applications)
+
+#### `abpm discover [OPTIONS]`
+Discovers and lists trending desktop applications from Flathub with automatic, high-performance DNF priority resolution.
+
+This command is designed both for CLI exploration and as the backend engine for **Blue Hub** (the Arrera Blue OS Software Center).
+
+#### Source Resolution Logic (DNF Priority)
+For each trending application:
+1. `abpm` resolves candidate RPM package names (e.g. `org.videolan.VLC` -> `vlc`, `org.gimp.GIMP` -> `gimp`).
+2. It queries available packages in the DNF repository cache via `libdnf5` in a single batch lookup (~150ms).
+3. If available in DNF repositories: `"source": "dnf"`, `"package": "<rpm_name>"`.
+4. If exclusive to Flathub: `"source": "flatpak"`, `"package": "<flatpak_id>"`.
+
+#### CLI Options
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `--dnf` | Flag | `false` | Discover desktop applications exclusively from DNF via AppStream metadata. |
+| `--flatpak` | Flag | `false` | Discover trending applications exclusively from Flathub. |
+| `--page <N>` | Integer ($\ge 1$) | `1` | Page number to retrieve. |
+| `--per-page <N>` | Integer ($\ge 1$) | `6` | Number of applications per page. |
+| `--json` | Flag | `false` | Outputs raw JSON to `stdout` without ANSI colors or banners for Blue Hub integration. |
+
+```bash
+# Explore mixed applications (50% DNF AppStream, 50% Flathub)
+abpm discover
+
+# Explore DNF applications only
+abpm discover --dnf
+
+# Explore Flathub applications only
+abpm discover --flatpak
+
+# Pagination: fetch 6 items starting from page 2
+abpm discover --page 2 --per-page 6
+
+# Raw JSON mode (consumed directly by Blue Hub)
+abpm discover --page 1 --per-page 6 --json
+```
+
+#### JSON Output Schema (`--json`)
+```json
+[
+  {
+    "id": "org.videolan.VLC",
+    "name": "VLC",
+    "summary": "Lecteur multimédia libre et polyvalent",
+    "icon": "vlc",
+    "source": "dnf",
+    "package": "vlc"
+  },
+  {
+    "id": "net.armatik.Kitsune",
+    "name": "Kitsune",
+    "summary": "Regardez des animes depuis AniLiberty",
+    "icon": "net.armatik.Kitsune",
+    "source": "flatpak",
+    "package": "net.armatik.Kitsune"
+  }
+]
+```
+
+---
+
+### 6. Listing Installed Packages
 
 #### `abpm list [OPTIONS]`
 Lists installed packages and applications on the system.
@@ -186,7 +254,7 @@ abpm list --tar
 
 ---
 
-### 6. Icon Management
+### 7. Icon Management
 
 #### `abpm set-icon <APP_NAME> <IMAGE_PATH>` *(Alias: `abpm icon`)*
 Customizes the icon of an already installed AppImage or Archive application. Copies the image to the dedicated `.icons/` directory and synchronizes all associated `.desktop` files.

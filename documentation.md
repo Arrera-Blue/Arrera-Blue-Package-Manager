@@ -250,6 +250,37 @@ abpm list --flatpak
 abpm list --rpm
 abpm list --appimage
 abpm list --tar
+
+# List only true installed desktop applications (ignores low-level system packages)
+abpm list --apps
+
+# Raw JSON output for Blue Hub integration
+abpm list --json
+```
+
+##### List JSON Output Schema (`abpm list --json`)
+```json
+[
+  {
+    "id": "com.visualstudio.code",
+    "name": "Visual Studio Code",
+    "version": "1.139.1",
+    "source": "flatpak",
+    "icon": "com.visualstudio.code",
+    "package": "com.visualstudio.code",
+    "is_system": false
+  },
+  {
+    "id": "org.gnome.Settings",
+    "name": "Paramètres",
+    "version": "1:50.4-2026.beta.1.fc44",
+    "source": "dnf",
+    "icon": "org.gnome.Settings",
+    "package": "arrera-gnome-control-center",
+    "is_system": true
+  }
+]
+```
 ```
 
 ---

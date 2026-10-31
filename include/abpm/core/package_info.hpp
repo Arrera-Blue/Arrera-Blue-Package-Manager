@@ -22,13 +22,24 @@ struct PackageInfo {
 };
 
 struct UpdateInfo {
-    std::string name;          // Nom
-    std::string id;            // Identifiant
-    std::string current_ver;   // Version actuellement installée
-    std::string new_ver;       // Version disponible
-    std::string arch;          // Architecture
-    PackageSource source;      // DNF ou FLATPAK
-    std::string origin;        // "flathub", "dnf", etc.
+    std::string name;
+    std::string id;
+    std::string current_ver;
+    std::string new_ver;
+    std::string arch;
+    PackageSource source;
+    std::string origin;
+};
+
+
+struct InstalledApp {
+    std::string id;           
+    std::string name;          
+    std::string version;       
+    std::string source;       
+    std::string icon;          
+    std::string package;       
+    bool is_system = false;    
 };
 
 } // namespace abpm::core

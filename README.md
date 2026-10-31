@@ -42,9 +42,11 @@
 
 ### List
 
-- `list` : Liste tous les paquets Flatpak et DNF installés.
-- `list --dnf` : Liste tous les paquets DNF installés.
-- `list --flatpak` : Liste tous les paquets Flatpak installés.
+- `list` : Liste tous les paquets Flatpak et DNF installés (mode complet).
+- `list --apps` : Liste uniquement les véritables applications installées (avec lanceurs `.desktop`), ignorant les paquets système bas niveau.
+- `list --json` : Sortie brute en JSON standardisé de toutes les applications installées (pour **Blue Hub**).
+- `list --dnf` : Liste tous les paquets DNF installés (ou les applications DNF si combiné avec `--apps` ou `--json`).
+- `list --flatpak` : Liste les applications Flatpak installées.
 - `list --rpm` : Liste tous les paquets installés via un fichier RPM local.
 - `list --appimage` : Liste toutes les applications installées au format AppImage.
 - `list --tar` : Liste toutes les applications installées via une archive (tar, zip).

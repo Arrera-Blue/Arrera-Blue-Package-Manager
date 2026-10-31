@@ -39,6 +39,7 @@ struct CliOptions {
     int discover_page = 1;     // Option --page <N>
     int discover_per_page = 6; // Option --per-page <N>
     bool json_output = false;  // Option --json
+    bool list_apps_only = false; // Option --apps
 };
 
 class CliParser {

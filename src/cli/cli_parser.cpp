@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.1");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.2");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -25,6 +25,9 @@ void CliParser::print_help() {
               << "  list [OPTIONS]          Liste les paquets installes\n"
               << "  set-icon <PKG> <IMAGE>  Modifie l'icone d'une application installee\n\n"
               << "  discover [OPTIONS]      Decouvrir les applications populaires / tendances\n\n"
+              << "OPTIONS DE LISTAGE:\n"
+              << "  --apps                  Lister uniquement les vraies applications (lanceurs .desktop)\n"
+              << "  --json                  Sortie brute au format JSON pour Blue Hub\n\n"
               << "OPTIONS DE SOURCE / FORMAT:\n"
               << "  --dnf                   Cibler uniquement DNF / RPM\n"
               << "  --flatpak               Cibler uniquement Flatpak / Flathub\n"
@@ -113,6 +116,8 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
             }
         } else if (arg == "--json") {
             options.json_output = true;
+        } else if (arg == "--apps") {
+            options.list_apps_only = true;
         } else if (arg.starts_with("--page=")) {
             try { options.discover_page = std::max(1, std::stoi(arg.substr(7))); } catch (...) {}
         } else if (arg == "--page") {

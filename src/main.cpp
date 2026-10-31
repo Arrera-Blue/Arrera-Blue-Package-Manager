@@ -5,6 +5,7 @@
 #include "abpm/appimage/appimage_backend.hpp"
 #include "abpm/archive/archive_backend.hpp"
 #include "abpm/discover/discover_backend.hpp"
+#include "abpm/list/list_backend.hpp"
 #include <iomanip>
 #include <iostream>
 
@@ -17,6 +18,7 @@ using abpm::dnf::DnfBackend;
 using abpm::appimage::AppImageBackend;
 using abpm::archive::ArchiveBackend;
 using abpm::discover::DiscoverBackend;
+using abpm::list::ListBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -31,8 +33,26 @@ int main(int argc, char* argv[]) {
             break;
 
         case CommandType::LIST: {
+            bool apps_mode = options.list_apps_only || options.json_output;
+
+            // 1. Sortie JSON brute pour Blue Hub (aucune bannière, aucun texte superflu)
+            if (options.json_output) {
+                auto apps = ListBackend::get_installed_apps(options.filter);
+                std::cout << ListBackend::to_json(apps);
+                break;
+            }
+
             Logger::banner();
 
+            // 2. Mode --apps dans le terminal : affichage épuré des applications uniquement
+            if (apps_mode) {
+                Logger::info("Récupération des applications installées...");
+                auto apps = ListBackend::get_installed_apps(options.filter);
+                ListBackend::print_terminal_apps(apps);
+                break;
+            }
+
+            // 3. Mode standard rétrocompatible (listing exhaustif des paquets DNF système)
             // 1. DNF (si filtre ALL ou DNF)
             if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
                 Logger::info("Récupération des paquets DNF (RPM)...");

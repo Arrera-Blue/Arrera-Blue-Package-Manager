@@ -492,6 +492,23 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        case CommandType::CLEAN: {
+            Logger::banner();
+            DnfBackend::CleanTarget target = DnfBackend::CleanTarget::ALL;
+            if (options.clean_target == "expire-cache" || options.clean_target == "expire") {
+                target = DnfBackend::CleanTarget::EXPIRE_CACHE;
+            } else if (options.clean_target == "packages" || options.clean_target == "pkgs") {
+                target = DnfBackend::CleanTarget::PACKAGES;
+            } else if (options.clean_target == "all" || options.clean_target.empty()) {
+                target = DnfBackend::CleanTarget::ALL;
+            } else {
+                Logger::error("Cible de nettoyage inconnue : '" + options.clean_target + "'. Utilisez 'all', 'expire-cache' ou 'packages'.");
+                return 1;
+            }
+            DnfBackend::clean(target);
+            break;
+        }
+
         default:
             Logger::info("Commande en cours de développement...");
             break;

@@ -11,6 +11,8 @@
 #include <libdnf5/base/goal.hpp>
 #include <libdnf5/base/transaction.hpp>
 #include <libdnf5/base/transaction_package.hpp>
+#include <libdnf5/repo/repo_cache.hpp>
+#include <unordered_map>
 #include <iostream>
 #include <memory>
 #include <unistd.h>
@@ -162,27 +164,38 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
         auto repo_sack = base.get_repo_sack();
         repo_sack->create_repos_from_system_configuration();
         repo_sack->load_repos();
-        // Récupérer les paquets qui sont des mises à jour de paquets installés
+
         libdnf5::rpm::PackageQuery query(base);
         query.filter_upgrades();
-        updates.reserve(query.size());
+
+        // Dédoublonnage : un paquet présent dans plusieurs miroirs n'apparaît qu'une fois
+        std::unordered_map<std::string, UpdateInfo> unique_updates;
+
         for (const auto& pkg : query) {
-            UpdateInfo info;
-            info.name = pkg.get_name();
-            info.id = pkg.get_nevra();
-            info.new_ver = pkg.get_evr();
-            info.arch = pkg.get_arch();
-            info.source = PackageSource::DNF;
-            info.origin = "dnf";
-            // Trouver la version actuellement installée
-            libdnf5::rpm::PackageQuery installed_query(base);
-            installed_query.filter_installed();
-            installed_query.filter_name(pkg.get_name());
-            if (installed_query.size() > 0) {
-                info.current_ver = (*installed_query.begin()).get_evr();
-            } else {
-                info.current_ver = "inconnue";
+            std::string name = pkg.get_name();
+            if (unique_updates.find(name) == unique_updates.end()) {
+                UpdateInfo info;
+                info.name = name;
+                info.id = pkg.get_nevra();
+                info.new_ver = pkg.get_evr();
+                info.arch = pkg.get_arch();
+                info.source = PackageSource::DNF;
+                info.origin = "dnf";
+
+                libdnf5::rpm::PackageQuery installed_query(base);
+                installed_query.filter_installed();
+                installed_query.filter_name(name);
+                if (!installed_query.empty()) {
+                    info.current_ver = (*installed_query.begin()).get_evr();
+                } else {
+                    info.current_ver = "inconnue";
+                }
+                unique_updates[name] = std::move(info);
             }
+        }
+
+        updates.reserve(unique_updates.size());
+        for (auto& [_, info] : unique_updates) {
             updates.push_back(std::move(info));
         }
     } catch (const std::exception& e) {
@@ -190,7 +203,6 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
     }
     return updates;
 }
-
 bool DnfBackend::update() {
     try {
         libdnf5::Base base;
@@ -500,6 +512,61 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
 
     } catch (const std::exception& e) {
         Logger::error(std::string("Erreur DNF : ") + e.what());
+        return false;
+    }
+}
+
+bool DnfBackend::clean(CleanTarget target) {
+    try {
+        libdnf5::Base base;
+        base.load_config();
+        base.setup();
+        auto repo_sack = base.get_repo_sack();
+        repo_sack->create_repos_from_system_configuration();
+
+        libdnf5::repo::RepoQuery q(base);
+
+        if (target == CleanTarget::EXPIRE_CACHE) {
+            Logger::info("Expiration du cache des dépôts...");
+            for (auto& repo : q) {
+                repo->expire();
+            }
+            Logger::success("Cache des dépôts expiré avec succès (les métadonnées seront rechargées au prochain appel).");
+            return true;
+        }
+
+        if (geteuid() != 0) {
+            Logger::warning("Le nettoyage des fichiers de cache système nécessite les privilèges administrateur.");
+            Logger::info("Relancez avec sudo : 'sudo abpm clean " + 
+                (target == CleanTarget::PACKAGES ? std::string("packages") : std::string("all")) + "'");
+            return false;
+        }
+
+        size_t total_files = 0;
+        for (auto& repo : q) {
+            std::string cachedir = repo->get_cachedir();
+            if (cachedir.empty()) continue;
+            try {
+                libdnf5::repo::RepoCache rc(base, cachedir);
+                if (target == CleanTarget::PACKAGES) {
+                    auto stats = rc.remove_packages();
+                    total_files += stats.get_files_removed();
+                } else if (target == CleanTarget::ALL) {
+                    repo->expire();
+                    auto stats = rc.remove_all();
+                    total_files += stats.get_files_removed();
+                }
+            } catch (...) {}
+        }
+
+        if (target == CleanTarget::PACKAGES) {
+            Logger::success("Paquets RPM mis en cache supprimés (" + std::to_string(total_files) + " fichier(s) effacé(s)).");
+        } else {
+            Logger::success("Cache système DNF complètement nettoyé (" + std::to_string(total_files) + " fichier(s) supprimé(s)).");
+        }
+        return true;
+    } catch (const std::exception& e) {
+        Logger::error(std::string("Erreur nettoyage DNF : ") + e.what());
         return false;
     }
 }

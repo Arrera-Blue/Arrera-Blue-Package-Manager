@@ -11,7 +11,7 @@ It seamlessly consolidates system packages (**DNF/RPM** via `libdnf5`), sandboxe
 1. [Architecture & Design](#architecture--design)
 2. [Prerequisites & Build](#prerequisites--build)
 3. [Command Reference](#command-reference)
-   - [update & check](#1-system-updates)
+   - [update, check & clean](#1-system-updates)
    - [install](#2-installation)
    - [remove](#3-uninstallation)
    - [search](#4-search)
@@ -108,6 +108,19 @@ abpm update -y    # Bypass confirmation prompts
 Refreshes repository metadata and displays a combined overview of all pending updates from both DNF and Flatpak without modifying the system.
 ```bash
 abpm check
+```
+
+#### `abpm clean [all | expire-cache | packages]`
+Manages and cleans local repository caches and downloaded RPM packages.
+```bash
+# Expire repo cache to force immediate metadata re-synchronization (no sudo needed)
+abpm clean expire-cache
+
+# Purge cached RPM packages to free up disk space
+sudo abpm clean packages
+
+# Completely purge all DNF5 cache files and metadata
+sudo abpm clean all
 ```
 
 ---

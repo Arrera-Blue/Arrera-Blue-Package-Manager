@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.2");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.3");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -24,6 +24,7 @@ void CliParser::print_help() {
               << "  search [OPTIONS] <PKG>  Recherche un paquet disponible\n"
               << "  list [OPTIONS]          Liste les paquets installes\n"
               << "  set-icon <PKG> <IMAGE>  Modifie l'icone d'une application installee\n\n"
+              << "  clean [CIBLE]           Nettoie le cache (all, expire-cache, packages)\n"
               << "  discover [OPTIONS]      Decouvrir les applications populaires / tendances\n\n"
               << "OPTIONS DE LISTAGE:\n"
               << "  --apps                  Lister uniquement les vraies applications (lanceurs .desktop)\n"
@@ -84,6 +85,8 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
         options.command = CommandType::LIST;
     } else if (first_arg == "set-icon" || first_arg == "icon") {
         options.command = CommandType::SET_ICON;
+    } else if (first_arg == "clean") {
+        options.command = CommandType::CLEAN;
     } else if (first_arg == "discover") {
         options.command = CommandType::DISCOVER;
     } else {
@@ -138,6 +141,14 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
         } else {
             // C'est un argument de paquet ou de fichier
             options.arguments.push_back(arg);
+        }
+    }
+
+    if (options.command == CommandType::CLEAN) {
+        if (!options.arguments.empty()) {
+            options.clean_target = options.arguments[0];
+        } else {
+            options.clean_target = "all";
         }
     }
 

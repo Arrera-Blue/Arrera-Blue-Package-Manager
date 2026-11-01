@@ -20,6 +20,13 @@ public:
     static std::vector<std::string> get_available_packages(const std::vector<std::string>& names);
     static bool remove(const std::vector<std::string>& package_names);
     static bool install_local_rpm(const std::string& file_path, bool assumeyes);
+    enum class CleanTarget {
+        ALL,
+        EXPIRE_CACHE,
+        PACKAGES
+    };
+
+    static bool clean(CleanTarget target);
     static std::vector<core::PackageInfo> list_installed_local_rpms();
 };
 

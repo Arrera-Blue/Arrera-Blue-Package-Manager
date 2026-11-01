@@ -16,7 +16,8 @@ enum class CommandType {
     HELP,
     SET_ICON,
     DISCOVER,
-    VERSION
+    VERSION,
+    CLEAN
 };
 
 enum class SourceFilter {
@@ -40,6 +41,7 @@ struct CliOptions {
     int discover_per_page = 6; // Option --per-page <N>
     bool json_output = false;  // Option --json
     bool list_apps_only = false; // Option --apps
+    std::string clean_target = "all";
 };
 
 class CliParser {

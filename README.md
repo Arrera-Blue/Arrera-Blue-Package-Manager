@@ -51,6 +51,12 @@
 - `list --appimage` : Liste toutes les applications installées au format AppImage.
 - `list --tar` : Liste toutes les applications installées via une archive (tar, zip).
 
+### Clean & Cache
+
+- `clean` ou `clean all` : Nettoie l'intégralité du cache système DNF (`/var/cache/libdnf5`). *(Nécessite sudo)*
+- `clean expire-cache` : Force l'expiration immédiate du cache local pour actualiser instantanément les nouveaux paquets des dépôts (ex: Copr).
+- `clean packages` : Supprime les paquets `.rpm` mis en cache pour libérer de l'espace disque. *(Nécessite sudo)*
+
 ### Options Générales
 
 - `-y`, `--yes` : Répond automatiquement oui à toutes les confirmations d'installation/désinstallation et sélectionne l'icône recommandée pour les archives.

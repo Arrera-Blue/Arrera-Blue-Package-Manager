@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.3
+Version:        2026.1.4
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -76,6 +76,12 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Sun Nov 01 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.4-1
+- Sécurisation complète de la résolution de dépendances DNF (install, update, remove).
+- Filtrage des mises à jour DNF bloquées via le solveur et signalement explicite des conflits.
+- Détection des suppressions de dépendances en cascade lors de abpm remove.
+- Affichage des actions détaillées de dépendances pour les paquets RPM.
+
 * Sun Nov 01 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.3-1
 - Ajout de la commande abpm clean (all, expire-cache, packages).
 - Dedoublonnage automatique des mises a jour DNF lors du check.

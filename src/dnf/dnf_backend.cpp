@@ -13,7 +13,9 @@
 #include <libdnf5/base/transaction_package.hpp>
 #include <libdnf5/repo/repo_cache.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <unistd.h>
 #include <filesystem>
@@ -165,38 +167,70 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
         repo_sack->create_repos_from_system_configuration();
         repo_sack->load_repos();
 
-        libdnf5::rpm::PackageQuery query(base);
-        query.filter_upgrades();
+        libdnf5::Goal goal(base);
+        goal.add_rpm_upgrade();
+        auto transaction = goal.resolve();
 
-        // Dédoublonnage : un paquet présent dans plusieurs miroirs n'apparaît qu'une fois
+        // Récupérer les paquets qui sont réellement dans la transaction de mise à jour résolue
         std::unordered_map<std::string, UpdateInfo> unique_updates;
 
-        for (const auto& pkg : query) {
-            std::string name = pkg.get_name();
-            if (unique_updates.find(name) == unique_updates.end()) {
-                UpdateInfo info;
-                info.name = name;
-                info.id = pkg.get_nevra();
-                info.new_ver = pkg.get_evr();
-                info.arch = pkg.get_arch();
-                info.source = PackageSource::DNF;
-                info.origin = "dnf";
+        for (const auto& trans_pkg : transaction.get_transaction_packages()) {
+            auto action = trans_pkg.get_action();
+            if (action == libdnf5::transaction::TransactionItemAction::UPGRADE ||
+                action == libdnf5::transaction::TransactionItemAction::INSTALL) {
+                auto pkg = trans_pkg.get_package();
+                std::string name = pkg.get_name();
+                if (unique_updates.find(name) == unique_updates.end()) {
+                    UpdateInfo info;
+                    info.name = name;
+                    info.id = pkg.get_nevra();
+                    info.new_ver = pkg.get_evr();
+                    info.arch = pkg.get_arch();
+                    info.source = PackageSource::DNF;
+                    info.origin = "dnf";
 
-                libdnf5::rpm::PackageQuery installed_query(base);
-                installed_query.filter_installed();
-                installed_query.filter_name(name);
-                if (!installed_query.empty()) {
-                    info.current_ver = (*installed_query.begin()).get_evr();
-                } else {
-                    info.current_ver = "inconnue";
+                    auto replaced = trans_pkg.get_replaces();
+                    if (!replaced.empty()) {
+                        info.current_ver = replaced[0].get_evr();
+                    } else {
+                        libdnf5::rpm::PackageQuery installed_query(base);
+                        installed_query.filter_installed();
+                        installed_query.filter_name(name);
+                        if (!installed_query.empty()) {
+                            info.current_ver = (*installed_query.begin()).get_evr();
+                        } else {
+                            info.current_ver = "nouveau";
+                        }
+                    }
+                    unique_updates[name] = std::move(info);
                 }
-                unique_updates[name] = std::move(info);
             }
         }
 
         updates.reserve(unique_updates.size());
         for (auto& [_, info] : unique_updates) {
             updates.push_back(std::move(info));
+        }
+
+        // Si le solveur a rencontré des dépendances non résolues (mises à jour différées)
+        auto logs = transaction.get_resolve_logs_as_strings();
+        if (!logs.empty()) {
+            Logger::warning("Mise(s) à jour DNF différée(s) (conflit de dépendances, ex: RPM Fusion) :");
+            std::unordered_set<std::string> seen;
+            for (const auto& log : logs) {
+                std::istringstream stream(log);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    auto start = line.find_first_not_of(" \t-•");
+                    if (start == std::string::npos) continue;
+                    std::string clean = line.substr(start);
+                    if (clean.starts_with("Problem") || clean.find("requires") != std::string::npos) {
+                        if (seen.insert(clean).second) {
+                            Logger::warning("  • " + clean);
+                        }
+                    }
+                }
+            }
         }
     } catch (const std::exception& e) {
         Logger::error(std::string("Erreur vérification DNF : ") + e.what());
@@ -220,8 +254,32 @@ bool DnfBackend::update() {
 
         auto transaction = goal.resolve();
 
+        auto logs = transaction.get_resolve_logs_as_strings();
+        if (!logs.empty()) {
+            Logger::warning("Conflit(s) de dépendance détecté(s) lors de la résolution :");
+            std::unordered_set<std::string> seen;
+            for (const auto& log : logs) {
+                std::istringstream stream(log);
+                std::string line;
+                while (std::getline(stream, line)) {
+                    auto start = line.find_first_not_of(" \t-•");
+                    if (start == std::string::npos) continue;
+                    std::string clean = line.substr(start);
+                    if (clean.starts_with("Problem") || clean.find("requires") != std::string::npos) {
+                        if (seen.insert(clean).second) {
+                            Logger::warning("  • " + clean);
+                        }
+                    }
+                }
+            }
+        }
+
         if (transaction.empty()) {
-            Logger::success("Tous les paquets système DNF sont déjà à jour !");
+            if (!logs.empty()) {
+                Logger::info("Aucune mise à jour applicable immédiatement (les paquets en conflit sont différés).");
+            } else {
+                Logger::success("Tous les paquets système DNF sont déjà à jour !");
+            }
             return true;
         }
 
@@ -276,16 +334,44 @@ bool DnfBackend::install(std::string_view package_name, bool assumeyes) {
         libdnf5::Goal goal(base);
         goal.add_rpm_install(std::string(package_name));
         auto transaction = goal.resolve();
-        // Si la transaction est vide, le paquet n'a pas été trouvé dans DNF
+
+        // Si la transaction est vide, vérifier si le paquet existe mais que ses dépendances échouent
         if (transaction.empty()) {
+            libdnf5::rpm::PackageQuery avail_q(base);
+            avail_q.filter_name(std::string(package_name));
+            if (!avail_q.empty()) {
+                Logger::error("Le paquet '" + std::string(package_name) + "' existe dans les dépôts DNF mais ne peut pas être installé (conflit de dépendances) :");
+                for (const auto& log : transaction.get_resolve_logs_as_strings()) {
+                    std::istringstream stream(log);
+                    std::string line;
+                    while (std::getline(stream, line)) {
+                        auto start = line.find_first_not_of(" \t-•");
+                        if (start != std::string::npos) {
+                            Logger::error("  • " + line.substr(start));
+                        }
+                    }
+                }
+                return true; // Pris en charge comme erreur DNF (ne pas basculer à tort sur Flathub)
+            }
             return false;
         }
+
         // 3. Afficher ce qui va être installé (le paquet et ses dépendances)
         auto tx_packages = transaction.get_transaction_packages();
         std::cout << "\n--- Paquets DNF à installer (" << tx_packages.size() << ") ---\n";
         for (const auto& tp : tx_packages) {
             const auto& pkg = tp.get_package();
-            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")\n";
+            auto action = tp.get_action();
+            std::string action_str = "";
+            if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
+                action_str = " [mise à jour]";
+            } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
+                action_str = " [rétrogradation]";
+            } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
+                       action == libdnf5::transaction::TransactionItemAction::REMOVE) {
+                action_str = " [suppression]";
+            }
+            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
         }
         std::cout << "\n";
         // 4. Demander confirmation
@@ -385,6 +471,18 @@ bool DnfBackend::remove(const std::vector<std::string>& package_names) {
             }
             return false;
         }
+
+        // Vérifier si d'autres paquets vont être supprimés en cascade
+        auto tx_packages = transaction.get_transaction_packages();
+        if (tx_packages.size() > package_names.size()) {
+            Logger::warning("Attention : Des paquets dépendants vont également être supprimés en cascade :");
+            for (const auto& tp : tx_packages) {
+                const auto& pkg = tp.get_package();
+                if (std::find(package_names.begin(), package_names.end(), pkg.get_name()) == package_names.end()) {
+                    Logger::warning("  • " + pkg.get_name() + " (" + pkg.get_evr() + ")");
+                }
+            }
+        }
         if (geteuid() != 0) {
             Logger::warning("La suppression de paquets système DNF nécessite les privilèges administrateur.");
             Logger::info("Relancez avec sudo pour finaliser la suppression DNF.");
@@ -475,7 +573,17 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
         std::cout << "\n--- Paquets RPM à installer (" << tx_packages.size() << ") ---\n";
         for (const auto& tp : tx_packages) {
             const auto& pkg = tp.get_package();
-            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")\n";
+            auto action = tp.get_action();
+            std::string action_str = "";
+            if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
+                action_str = " [mise à jour]";
+            } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
+                action_str = " [rétrogradation]";
+            } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
+                       action == libdnf5::transaction::TransactionItemAction::REMOVE) {
+                action_str = " [suppression]";
+            }
+            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
         }
         std::cout << "\n";
 

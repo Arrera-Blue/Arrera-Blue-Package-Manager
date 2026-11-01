@@ -18,3 +18,9 @@ CMakeCache.txt
 *~
 .cache/
 compile_commands.json
+
+# Paquets et archives générés
+*.tar.gz
+*.tar.xz
+*.rpm
+rpmbuild/

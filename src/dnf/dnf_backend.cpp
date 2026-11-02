@@ -1,9 +1,11 @@
 #include "abpm/dnf/dnf_backend.hpp"
 #include "abpm/core/logger.hpp"
+#include "abpm/core/progress_emitter.hpp"
 #include <libdnf5/base/base.hpp>
 #include <libdnf5/repo/repo_sack.hpp>
 #include <libdnf5/repo/repo_query.hpp>
 #include <libdnf5/repo/repo_callbacks.hpp>
+#include <libdnf5/repo/download_callbacks.hpp>
 #include <libdnf5/rpm/package_query.hpp>
 #include <libdnf5/rpm/transaction_callbacks.hpp>
 #include <libdnf5/rpm/rpm_signature.hpp>
@@ -19,42 +21,105 @@
 #include <memory>
 #include <unistd.h>
 #include <filesystem>
+#include <algorithm>
 
 namespace abpm::dnf {
 
 using core::PackageInfo;
 using core::PackageSource;
-using core::Logger;
 using core::UpdateInfo;
+using core::Logger;
+using core::ProgressEmitter;
 
 namespace {
 
+// Callbacks pour le téléchargement des paquets DNF (mappé de 15% à 50%)
+class AbpmDownloadCallbacks : public libdnf5::repo::DownloadCallbacks {
+public:
+    void* add_new_download(void* user_data, const char* /*description*/, double total_to_download) override {
+        m_total_bytes += total_to_download;
+        return user_data;
+    }
+
+    int progress(void* /*user_cb_data*/, double total_to_download, double downloaded) override {
+        if (ProgressEmitter::is_enabled() && total_to_download > 0) {
+            double ratio = std::min(1.0, std::max(0.0, downloaded / total_to_download));
+            int pct = 15 + static_cast<int>(ratio * 35.0); // 15% -> 50%
+            if (pct > m_last_pct) {
+                m_last_pct = pct;
+                ProgressEmitter::emit(pct, "Téléchargement des paquets (" + std::to_string(pct) + "%)...");
+            }
+        }
+        return 0;
+    }
+
+    int end(void* /*user_cb_data*/, TransferStatus /*status*/, const char* /*msg*/) override {
+        return 0;
+    }
+
+private:
+    double m_total_bytes = 0;
+    int m_last_pct = 15;
+};
+
+// Callbacks pour l'installation RPM (mappé de 50% à 95%)
 class AbpmTransactionCallbacks : public libdnf5::rpm::TransactionCallbacks {
 public:
+    void verify_start(uint64_t /*total*/) override {
+        ProgressEmitter::emit(52, "Vérification des signatures et de l'intégrité...");
+    }
+
+    void elem_progress(const libdnf5::base::TransactionPackage & item, uint64_t amount, uint64_t total) override {
+        if (ProgressEmitter::is_enabled()) {
+            uint64_t safe_total = std::max<uint64_t>(1, total);
+            int pct = 55 + static_cast<int>((double)amount / safe_total * 40.0); // 55% -> 95%
+            std::string name = item.get_package().get_name();
+            ProgressEmitter::emit(pct, "Installation de " + name + " (" + std::to_string(amount + 1) + "/" + std::to_string(total) + ")...");
+        }
+    }
+
     void install_start(const libdnf5::base::TransactionPackage & item, uint64_t /*total*/) override {
-        Logger::info("Installation de " + item.get_package().get_name() + " (" + item.get_package().get_evr() + ")...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Installation de " + item.get_package().get_name() + " (" + item.get_package().get_evr() + ")...");
+        }
     }
 
     void uninstall_start(const libdnf5::base::TransactionPackage & item, uint64_t /*total*/) override {
-        Logger::info("Suppression de " + item.get_package().get_name() + "...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Suppression de " + item.get_package().get_name() + "...");
+        }
     }
 
     void script_start(const libdnf5::base::TransactionPackage * item, libdnf5::rpm::Nevra nevra, ScriptType type) override {
         std::string name = item ? item->get_package().get_name() : nevra.get_name();
-        Logger::info("Exécution du script " + std::string(script_type_to_string(type)) + " de " + name + "...");
+        ProgressEmitter::emit(92, "Configuration de " + name + " (script " + std::string(script_type_to_string(type)) + ")...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Exécution du script " + std::string(script_type_to_string(type)) + " de " + name + "...");
+        }
     }
 
     void script_error(const libdnf5::base::TransactionPackage * item, libdnf5::rpm::Nevra nevra, ScriptType type, uint64_t return_code) override {
         std::string name = item ? item->get_package().get_name() : nevra.get_name();
+        ProgressEmitter::emit_error("Le script " + std::string(script_type_to_string(type)) + " de " + name + " a échoué (code " + std::to_string(return_code) + ")");
         Logger::error("Le script " + std::string(script_type_to_string(type)) + " de " + name + " a échoué (code retour: " + std::to_string(return_code) + ")");
     }
 
     void unpack_error(const libdnf5::base::TransactionPackage & item) override {
+        ProgressEmitter::emit_error("Échec lors de l'extraction de " + item.get_package().get_name());
         Logger::error("Échec lors de l'extraction de " + item.get_package().get_name());
     }
 
     void cpio_error(const libdnf5::base::TransactionPackage & item) override {
+        ProgressEmitter::emit_error("Erreur CPIO pour " + item.get_package().get_name());
         Logger::error("Erreur CPIO pour " + item.get_package().get_name());
+    }
+
+    void after_complete(bool success) override {
+        if (success) {
+            ProgressEmitter::emit(100, "Installation terminée avec succès");
+        } else {
+            ProgressEmitter::emit_error("Échec de la transaction RPM");
+        }
     }
 };
 
@@ -321,25 +386,33 @@ bool DnfBackend::install(std::string_view package_name, bool assumeyes) {
         auto repo_sack = base.get_repo_sack();
         repo_sack->create_repos_from_system_configuration();
         setup_repo_callbacks(base);
+        base.set_download_callbacks(std::make_unique<AbpmDownloadCallbacks>());
         repo_sack->load_repos();
+
         // 1. Vérifier si le paquet est déjà installé
         libdnf5::rpm::PackageQuery installed_q(base);
         installed_q.filter_installed();
         installed_q.filter_name(std::string(package_name));
         if (!installed_q.empty()) {
-            Logger::info(std::string("Le paquet '") + std::string(package_name) + "' est déjà installé sur le système.");
+            if (ProgressEmitter::is_enabled()) {
+                ProgressEmitter::emit(100, "L'application est déjà installée sur le système");
+            } else {
+                Logger::info(std::string("Le paquet '") + std::string(package_name) + "' est déjà installé sur le système.");
+            }
             return true;
         }
+
         // 2. Préparer la transaction d'installation
+        ProgressEmitter::emit(5, "Résolution des dépendances...");
         libdnf5::Goal goal(base);
         goal.add_rpm_install(std::string(package_name));
         auto transaction = goal.resolve();
 
-        // Si la transaction est vide, vérifier si le paquet existe mais que ses dépendances échouent
         if (transaction.empty()) {
             libdnf5::rpm::PackageQuery avail_q(base);
             avail_q.filter_name(std::string(package_name));
             if (!avail_q.empty()) {
+                ProgressEmitter::emit_error("Conflit de dépendances lors de l'installation de " + std::string(package_name));
                 Logger::error("Le paquet '" + std::string(package_name) + "' existe dans les dépôts DNF mais ne peut pas être installé (conflit de dépendances) :");
                 for (const auto& log : transaction.get_resolve_logs_as_strings()) {
                     std::istringstream stream(log);
@@ -351,56 +424,74 @@ bool DnfBackend::install(std::string_view package_name, bool assumeyes) {
                         }
                     }
                 }
-                return true; // Pris en charge comme erreur DNF (ne pas basculer à tort sur Flathub)
+                return true;
             }
             return false;
         }
 
-        // 3. Afficher ce qui va être installé (le paquet et ses dépendances)
+        // 3. Affichage si mode interactif classique
         auto tx_packages = transaction.get_transaction_packages();
-        std::cout << "\n--- Paquets DNF à installer (" << tx_packages.size() << ") ---\n";
-        for (const auto& tp : tx_packages) {
-            const auto& pkg = tp.get_package();
-            auto action = tp.get_action();
-            std::string action_str = "";
-            if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
-                action_str = " [mise à jour]";
-            } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
-                action_str = " [rétrogradation]";
-            } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
-                       action == libdnf5::transaction::TransactionItemAction::REMOVE) {
-                action_str = " [suppression]";
+        if (!ProgressEmitter::is_enabled()) {
+            std::cout << "\n--- Paquets DNF à installer (" << tx_packages.size() << ") ---\n";
+            for (const auto& tp : tx_packages) {
+                const auto& pkg = tp.get_package();
+                auto action = tp.get_action();
+                std::string action_str = "";
+                if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
+                    action_str = " [mise à jour]";
+                } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
+                    action_str = " [rétrogradation]";
+                } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
+                           action == libdnf5::transaction::TransactionItemAction::REMOVE) {
+                    action_str = " [suppression]";
+                }
+                std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
             }
-            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
+            std::cout << "\n";
         }
-        std::cout << "\n";
-        // 4. Demander confirmation
+
+        // 4. Confirmation (ignorée si assumeyes ou si progress est actif)
         if (!assumeyes) {
             if (!Logger::confirm("Voulez-vous procéder à l'installation ?")) {
                 Logger::info("Installation annulée.");
                 return true;
             }
         }
-        // 5. Vérifier les privilèges root
+
+        // 5. Privilèges root
         if (geteuid() != 0) {
+            ProgressEmitter::emit_error("L'installation nécessite les privilèges administrateur (ex: pkexec)");
             Logger::warning("L'installation de paquets système DNF nécessite les privilèges administrateur.");
             Logger::info("Relancez avec sudo : 'sudo abpm install " + std::string(package_name) + "'");
             return true;
         }
-        Logger::info("Téléchargement des paquets...");
+
+        ProgressEmitter::emit(15, "Téléchargement des paquets...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Téléchargement des paquets...");
+        }
         transaction.download();
-        Logger::info("Installation des paquets RPM...");
+
+        ProgressEmitter::emit(50, "Préparation de l'installation des paquets...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Installation des paquets RPM...");
+        }
         transaction.set_callbacks(std::make_unique<AbpmTransactionCallbacks>());
         auto result = transaction.run();
+
         if (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
-            Logger::success("Paquet '" + std::string(package_name) + "' installé avec succès via DNF !");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::success("Paquet '" + std::string(package_name) + "' installé avec succès via DNF !");
+            }
             return true;
         } else {
+            ProgressEmitter::emit_error("Échec de la transaction DNF");
             Logger::error("Échec de l'installation DNF.");
             log_transaction_errors(transaction, result);
             return true;
         }
     } catch (const std::exception& e) {
+        ProgressEmitter::emit_error(std::string("Erreur DNF : ") + e.what());
         Logger::error(std::string("Erreur DNF : ") + e.what());
         return false;
     }
@@ -550,9 +641,11 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
         base.load_config();
         base.setup();
 
+        ProgressEmitter::emit(5, "Analyse et résolution des dépendances du RPM local...");
         auto repo_sack = base.get_repo_sack();
         repo_sack->create_repos_from_system_configuration();
         setup_repo_callbacks(base);
+        base.set_download_callbacks(std::make_unique<AbpmDownloadCallbacks>());
         repo_sack->load_repos();
 
         libdnf5::Goal goal(base);
@@ -561,6 +654,7 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
 
         auto transaction = goal.resolve();
         if (transaction.empty()) {
+            ProgressEmitter::emit_error("Impossible de résoudre l'installation de ce fichier RPM.");
             for (const auto& log : transaction.get_resolve_logs_as_strings()) {
                 Logger::warning(log);
             }
@@ -570,22 +664,24 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
 
         // Afficher ce qui va être installé (le paquet local + dépendances)
         auto tx_packages = transaction.get_transaction_packages();
-        std::cout << "\n--- Paquets RPM à installer (" << tx_packages.size() << ") ---\n";
-        for (const auto& tp : tx_packages) {
-            const auto& pkg = tp.get_package();
-            auto action = tp.get_action();
-            std::string action_str = "";
-            if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
-                action_str = " [mise à jour]";
-            } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
-                action_str = " [rétrogradation]";
-            } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
-                       action == libdnf5::transaction::TransactionItemAction::REMOVE) {
-                action_str = " [suppression]";
+        if (!ProgressEmitter::is_enabled()) {
+            std::cout << "\n--- Paquets RPM à installer (" << tx_packages.size() << ") ---\n";
+            for (const auto& tp : tx_packages) {
+                const auto& pkg = tp.get_package();
+                auto action = tp.get_action();
+                std::string action_str = "";
+                if (action == libdnf5::transaction::TransactionItemAction::UPGRADE) {
+                    action_str = " [mise à jour]";
+                } else if (action == libdnf5::transaction::TransactionItemAction::DOWNGRADE) {
+                    action_str = " [rétrogradation]";
+                } else if (action == libdnf5::transaction::TransactionItemAction::REPLACED ||
+                           action == libdnf5::transaction::TransactionItemAction::REMOVE) {
+                    action_str = " [suppression]";
+                }
+                std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
             }
-            std::cout << " • " << pkg.get_name() << " " << pkg.get_evr() << " (" << pkg.get_arch() << ")" << action_str << "\n";
+            std::cout << "\n";
         }
-        std::cout << "\n";
 
         // Confirmation
         if (!assumeyes) {
@@ -597,22 +693,32 @@ bool DnfBackend::install_local_rpm(const std::string& file_path, bool assumeyes)
 
         // Vérifier les droits root
         if (geteuid() != 0) {
+            ProgressEmitter::emit_error("L'installation d'un fichier RPM nécessite les privilèges administrateur (ex: pkexec)");
             Logger::warning("L'installation d'un fichier RPM nécessite les privilèges administrateur.");
             Logger::info("Relancez avec sudo : 'sudo abpm install --rpm " + file_path + "'");
             return true;
         }
 
-        Logger::info("Téléchargement des dépendances éventuelles...");
+        ProgressEmitter::emit(15, "Téléchargement des dépendances éventuelles...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Téléchargement des dépendances éventuelles...");
+        }
         transaction.download();
 
-        Logger::info("Installation du paquet RPM...");
+        ProgressEmitter::emit(50, "Installation du paquet RPM...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Installation du paquet RPM...");
+        }
         transaction.set_callbacks(std::make_unique<AbpmTransactionCallbacks>());
         auto result = transaction.run();
 
         if (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
-            Logger::success("Fichier RPM installé avec succès !");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::success("Fichier RPM installé avec succès !");
+            }
             return true;
         } else {
+            ProgressEmitter::emit_error("Échec lors de l'installation du fichier RPM.");
             Logger::error("Échec lors de l'installation du fichier RPM.");
             log_transaction_errors(transaction, result);
             return false;

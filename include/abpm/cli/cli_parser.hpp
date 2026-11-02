@@ -42,6 +42,7 @@ struct CliOptions {
     bool json_output = false;  // Option --json
     bool list_apps_only = false; // Option --apps
     std::string clean_target = "all";
+    bool progress = false;       
 };
 
 class CliParser {

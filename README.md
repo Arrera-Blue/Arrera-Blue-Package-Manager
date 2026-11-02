@@ -16,6 +16,7 @@
 - `install --appimage [FICHIER_APPIMAGE]` : Installation et intégration d'une application au format AppImage (avec extraction automatique de l'icône dans `.icons/`).
 - `install --tar [FICHIER_ARCHIVE]` : Installation d'une application distribuée sous forme d'archive tar ou zip (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar`, `.zip`). Détecte les binaires, recherche les icônes PNG candidates et propose une sélection interactive si plusieurs icônes sont présentes.
 - `install [OPTIONS] --icon [FICHIER_IMAGE] [APPLICATION]` : Permet de spécifier directement une icône lors de l'installation d'une archive ou d'une AppImage sans passer par la détection automatique.
+- `install [OPTIONS] --progress [PAQUET]` : Émet un flux textuel non tamponné (`PROGRESS:<PCT>:<MESSAGE>` ou `PROGRESS:ERROR:<MSG>`) sans style ANSI ni bannières, permettant aux interfaces graphiques (**Blue Hub**) d'afficher la progression en temps réel. Active implicitement le mode non interactif (`-y`).
 
 ### Set-Icon
 
@@ -60,6 +61,7 @@
 ### Options Générales
 
 - `-y`, `--yes` : Répond automatiquement oui à toutes les confirmations d'installation/désinstallation et sélectionne l'icône recommandée pour les archives.
+- `--progress` : Active le mode de progression temps réel sur `stdout` (`PROGRESS:<0-100>:<MESSAGE>`) pour intégration avec Blue Hub.
 - `-h`, `--help` : Affiche l'aide de l'outil et les commandes disponibles.
 - `-v`, `--version` : Affiche la version d'abpm et les technologies sous-jacentes (libdnf5, libflatpak).
 

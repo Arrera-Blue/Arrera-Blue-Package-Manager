@@ -1,6 +1,7 @@
 #include "abpm/appimage/appimage_backend.hpp"
 #include "abpm/dnf/dnf_backend.hpp"
 #include "abpm/core/logger.hpp"
+#include "abpm/core/progress_emitter.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -14,6 +15,7 @@ namespace fs = std::filesystem;
 using core::Logger;
 using core::PackageInfo;
 using core::PackageSource;
+using core::ProgressEmitter;
 
 namespace {
 
@@ -245,29 +247,43 @@ fs::path extract_appimage_icon(const fs::path& appimage_path, const fs::path& ic
 
 bool AppImageBackend::install(const std::string& file_path, bool assumeyes, const std::string& custom_icon) {
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
-        Logger::error("Fichier AppImage introuvable : '" + file_path + "'");
+        std::string msg = "Fichier AppImage introuvable : '" + file_path + "'";
+        ProgressEmitter::emit_error(msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(msg);
+        }
         return false;
     }
+
+    ProgressEmitter::emit(10, "Vérification du fichier AppImage...");
 
     auto [app_name, version] = parse_appimage_filename(file_path);
     auto paths = get_paths();
 
     // Vérification intelligente de la présence de FUSE (fuse-libs)
     if (!dnf::DnfBackend::is_installed("fuse-libs")) {
-        Logger::warning("La bibliothèque système 'fuse-libs' est requise pour exécuter les AppImages.");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::warning("La bibliothèque système 'fuse-libs' est requise pour exécuter les AppImages.");
+        }
         if (paths.is_system) {
-            Logger::info("Installation automatique de 'fuse-libs' via DNF...");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::info("Installation automatique de 'fuse-libs' via DNF...");
+            }
             dnf::DnfBackend::install("fuse-libs", true);
         } else {
-            Logger::info("Pour que votre application puisse démarrer, installez-la avec : 'sudo abpm install fuse-libs'");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::info("Pour que votre application puisse démarrer, installez-la avec : 'sudo abpm install fuse-libs'");
+            }
         }
     }
 
-    std::cout << "\n--- Installation AppImage ---\n";
-    std::cout << " • Application : " << app_name << "\n";
-    std::cout << " • Version     : " << version << "\n";
-    std::cout << " • Destination : " << (paths.is_system ? "/opt/applications/" : "~/Applications/") << "\n";
-    std::cout << " • Contexte    : " << (paths.is_system ? "Système (administrateur)" : "Utilisateur local") << "\n\n";
+    if (!ProgressEmitter::is_enabled()) {
+        std::cout << "\n--- Installation AppImage ---\n";
+        std::cout << " • Application : " << app_name << "\n";
+        std::cout << " • Version     : " << version << "\n";
+        std::cout << " • Destination : " << (paths.is_system ? "/opt/applications/" : "~/Applications/") << "\n";
+        std::cout << " • Contexte    : " << (paths.is_system ? "Système (administrateur)" : "Utilisateur local") << "\n\n";
+    }
 
     if (!assumeyes) {
         if (!Logger::confirm("Voulez-vous installer cette application AppImage ?")) {
@@ -277,6 +293,7 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
     }
 
     try {
+        ProgressEmitter::emit(30, "Préparation et copie de l'application...");
         // 1. Créer les répertoires nécessaires
         fs::create_directories(paths.apps_dir);
         fs::create_directories(paths.bin_dir);
@@ -286,9 +303,12 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
         fs::path target_appimage = paths.apps_dir / (app_name + ".AppImage");
         fs::path canonical_src = fs::canonical(file_path);
 
-        Logger::info("Copie de l'AppImage vers " + target_appimage.string() + "...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Copie de l'AppImage vers " + target_appimage.string() + "...");
+        }
         fs::copy_file(canonical_src, target_appimage, fs::copy_options::overwrite_existing);
 
+        ProgressEmitter::emit(60, "Configuration des permissions et liens symboliques...");
         // 3. Rendre exécutable (chmod +x)
         fs::permissions(target_appimage,
             fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec |
@@ -302,8 +322,11 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
             fs::remove(target_symlink);
         }
         fs::create_symlink(target_appimage, target_symlink);
-        Logger::info("Lien symbolique créé : " + target_symlink.string());
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Lien symbolique créé : " + target_symlink.string());
+        }
 
+        ProgressEmitter::emit(80, "Extraction de l'icône et création du lanceur bureau...");
         // 5. Extraction et configuration de l'icône
         fs::create_directories(paths.icons_dir);
         fs::path extracted_icon;
@@ -322,7 +345,7 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
             extracted_icon = extract_appimage_icon(target_appimage, paths.icons_dir, app_name);
         }
         std::string icon_str = !extracted_icon.empty() ? extracted_icon.string() : "application-x-executable";
-        if (!extracted_icon.empty()) {
+        if (!extracted_icon.empty() && !ProgressEmitter::is_enabled()) {
             Logger::info("Icône configurée : " + extracted_icon.string());
         }
         // 6. Créer le fichier .desktop pour le bureau
@@ -338,9 +361,12 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
             df << "Categories=Utility;Application;\n";
             df << "Comment=Application AppImage installée via abpm\n";
         }
-        Logger::info("Lanceur bureau créé : " + target_desktop.string());
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Lanceur bureau créé : " + target_desktop.string());
+        }
 
-        // 6. Mettre à jour la base de données locale
+        ProgressEmitter::emit(95, "Enregistrement de l'application...");
+        // 7. Mettre à jour la base de données locale
         auto records = load_manifest(paths.manifest_file, paths.is_system);
         // Supprimer si déjà présent pour mise à jour
         records.erase(std::remove_if(records.begin(), records.end(),
@@ -357,11 +383,18 @@ bool AppImageBackend::install(const std::string& file_path, bool assumeyes, cons
 
         save_manifest(paths.manifest_file, records);
 
-        Logger::success("Application '" + app_name + "' installée avec succès !");
+        ProgressEmitter::emit(100, "Installation de " + app_name + " terminée avec succès");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::success("Application '" + app_name + "' installée avec succès !");
+        }
         return true;
 
     } catch (const std::exception& e) {
-        Logger::error(std::string("Erreur lors de l'installation AppImage : ") + e.what());
+        std::string msg = std::string("Erreur lors de l'installation AppImage : ") + e.what();
+        ProgressEmitter::emit_error(msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(msg);
+        }
         return false;
     }
 }

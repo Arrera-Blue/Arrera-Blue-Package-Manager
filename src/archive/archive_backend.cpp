@@ -1,5 +1,6 @@
 #include "abpm/archive/archive_backend.hpp"
 #include "abpm/core/logger.hpp"
+#include "abpm/core/progress_emitter.hpp"
 #include <archive.h>
 #include <archive_entry.h>
 #include <iostream>
@@ -16,6 +17,7 @@ namespace fs = std::filesystem;
 using core::Logger;
 using core::PackageInfo;
 using core::PackageSource;
+using core::ProgressEmitter;
 
 namespace {
 
@@ -463,18 +465,26 @@ void save_manifest(const fs::path& manifest_path, const std::vector<ArchiveRecor
 
 bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const std::string& custom_icon) {
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
-        Logger::error("Fichier d'archive introuvable : '" + file_path + "'");
+        std::string msg = "Fichier d'archive introuvable : '" + file_path + "'";
+        ProgressEmitter::emit_error(msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(msg);
+        }
         return false;
     }
+
+    ProgressEmitter::emit(10, "Vérification de l'archive...");
 
     auto [app_name, version] = parse_archive_filename(file_path);
     auto paths = get_paths();
 
-    std::cout << "\n--- Installation Archive (Tar / Zip) ---\n";
-    std::cout << " • Application : " << app_name << "\n";
-    std::cout << " • Version     : " << version << "\n";
-    std::cout << " • Destination : " << (paths.is_system ? ("/opt/applications/" + app_name + "/") : ("~/Applications/" + app_name + "/")) << "\n";
-    std::cout << " • Contexte    : " << (paths.is_system ? "Système (administrateur)" : "Utilisateur local") << "\n\n";
+    if (!ProgressEmitter::is_enabled()) {
+        std::cout << "\n--- Installation Archive (Tar / Zip) ---\n";
+        std::cout << " • Application : " << app_name << "\n";
+        std::cout << " • Version     : " << version << "\n";
+        std::cout << " • Destination : " << (paths.is_system ? ("/opt/applications/" + app_name + "/") : ("~/Applications/" + app_name + "/")) << "\n";
+        std::cout << " • Contexte    : " << (paths.is_system ? "Système (administrateur)" : "Utilisateur local") << "\n\n";
+    }
 
     if (!assumeyes) {
         if (!Logger::confirm("Voulez-vous installer cette application depuis l'archive ?")) {
@@ -484,11 +494,14 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
     }
 
     try {
+        ProgressEmitter::emit(30, "Préparation du répertoire d'installation...");
         fs::path target_app_dir = paths.apps_dir / app_name;
 
         // Préparer les répertoires
         if (fs::exists(target_app_dir)) {
-            Logger::info("Nettoyage de l'ancienne version dans " + target_app_dir.string() + "...");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::info("Nettoyage de l'ancienne version dans " + target_app_dir.string() + "...");
+            }
             fs::remove_all(target_app_dir);
         }
         fs::create_directories(target_app_dir);
@@ -496,9 +509,14 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
         fs::create_directories(paths.desktop_dir);
 
         // Extraction
-        Logger::info("Extraction native de l'archive en cours...");
+        ProgressEmitter::emit(50, "Extraction native de l'archive...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Extraction native de l'archive en cours...");
+        }
         if (!extract_archive(file_path, target_app_dir)) {
-            Logger::error("Échec de l'extraction de l'archive.");
+            std::string msg = "Échec de l'extraction de l'archive.";
+            ProgressEmitter::emit_error(msg);
+            Logger::error(msg);
             fs::remove_all(target_app_dir);
             return false;
         }
@@ -601,8 +619,12 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
             }
         }
 
+        ProgressEmitter::emit(80, "Configuration des binaires, icônes et lanceurs bureau...");
+
         if (!bundled_desktops.empty()) {
-            Logger::info("Fichier(s) .desktop détecté(s) dans l'archive (" + std::to_string(bundled_desktops.size()) + ")");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::info("Fichier(s) .desktop détecté(s) dans l'archive (" + std::to_string(bundled_desktops.size()) + ")");
+            }
 
             for (const auto& bdf : bundled_desktops) {
                 std::ifstream in_df(bdf);
@@ -743,13 +765,21 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
         rec.is_system = paths.is_system;
         records.push_back(std::move(rec));
 
+        ProgressEmitter::emit(95, "Enregistrement de l'application...");
         save_manifest(paths.manifest_file, records);
 
-        Logger::success("Application '" + app_name + "' installée avec succès depuis l'archive !");
+        ProgressEmitter::emit(100, "Installation de " + app_name + " terminée avec succès");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::success("Application '" + app_name + "' installée avec succès depuis l'archive !");
+        }
         return true;
 
     } catch (const std::exception& e) {
-        Logger::error(std::string("Erreur lors de l'installation de l'archive : ") + e.what());
+        std::string msg = std::string("Erreur lors de l'installation de l'archive : ") + e.what();
+        ProgressEmitter::emit_error(msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(msg);
+        }
         return false;
     }
 }

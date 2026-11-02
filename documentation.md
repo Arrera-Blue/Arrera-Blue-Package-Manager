@@ -157,6 +157,14 @@ Bypasses all interactive confirmation prompts and automatically selects the reco
 abpm install -y --tar toolsuite.zip
 ```
 
+#### Real-time Progress Streaming Flag: `--progress`
+Emits machine-readable, unbuffered execution progress lines directly to `stdout` (`PROGRESS:<0-100>:<MESSAGE>` and `PROGRESS:ERROR:<DESCRIPTION>`) without ANSI escape sequences or banners. Designed for graphical frontend integrations such as **Blue Hub**. Automatically enables non-interactive confirmation (`-y`).
+
+```bash
+abpm install --progress vlc
+abpm install -y --progress --tar application.tar.gz
+```
+
 ---
 
 ### 3. Uninstallation

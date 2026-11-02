@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.4");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.5");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -40,9 +40,11 @@ void CliParser::print_help() {
               << "  --page <N>              Numero de la page a charger (defaut: 1)\n"
               << "  --per-page <N>          Nombre d'applications par page (defaut: 6)\n"
               << "  --json                  Sortie brute au format JSON pour Blue Hub\n"
-              << "  -y, --yes               Repondre oui a toutes les confirmations\n"
+              << "  -y, --yes               Repond oui automatiquement a toutes les confirmations\n"
+              << "  --progress              Emet un flux de progression temps reel pour Blue Hub\n"
               << "  -h, --help              Affiche cette aide\n"
               << "  -v, --version           Affiche la version de abpm\n";
+    
 }
 
 CliOptions CliParser::parse(int argc, char* argv[]) {
@@ -117,6 +119,9 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
             } else {
                 Logger::error("L'option --icon requiert un chemin de fichier.");
             }
+        } else if (arg == "--progress") {
+            options.progress = true;
+            options.assumeyes = true; // Un GUI ne peut pas répondre au prompt interactif
         } else if (arg == "--json") {
             options.json_output = true;
         } else if (arg == "--apps") {

@@ -1,5 +1,6 @@
 #include "abpm/flatpak/flatpak_backend.hpp"
 #include "abpm/core/logger.hpp"
+#include "abpm/core/progress_emitter.hpp"
 #include <flatpak.h>
 #include <algorithm>
 #include <cstring>
@@ -11,6 +12,7 @@ using core::PackageInfo;
 using core::PackageSource;
 using core::Logger;
 using core::UpdateInfo;
+using core::ProgressEmitter;
 
 static void collect_from_installation(FlatpakInstallation* installation, 
                                       const std::string& origin_label,
@@ -211,6 +213,8 @@ bool FlatpakBackend::update() {
 }
 
 bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
+    ProgressEmitter::emit(5, "Recherche de l'application sur Flathub...");
+
     // 1. Rechercher les correspondances sur Flathub
     auto candidates = search(app_name);
     if (candidates.empty()) {
@@ -227,8 +231,10 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
         }
     }
     // 2. Afficher ce qui va être installé
-    std::cout << "\n--- Application Flatpak trouvée sur " << chosen.origin << " ---\n"
-              << " • " << chosen.id << " [" << chosen.origin << " / " << chosen.version << "]\n\n";
+    if (!ProgressEmitter::is_enabled()) {
+        std::cout << "\n--- Application Flatpak trouvée sur " << chosen.origin << " ---\n"
+                  << " • " << chosen.id << " [" << chosen.origin << " / " << chosen.version << "]\n\n";
+    }
     // 3. Demander confirmation
     if (!assumeyes) {
         if (!Logger::confirm("Voulez-vous installer cette application Flatpak ?")) {
@@ -236,38 +242,73 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
             return true;
         }
     }
+
+    ProgressEmitter::emit(15, "Préparation de l'installation de " + chosen.name + " via Flatpak...");
+
     // 4. Lancer la transaction d'installation
     g_autoptr(GError) err = nullptr;
     g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
     if (!inst) {
-        Logger::error("Impossible d'accéder au système Flatpak.");
-        return true;
+        std::string err_msg = std::string("Impossible d'accéder au système Flatpak : ") + (err ? err->message : "inconnu");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
+        return false;
     }
     g_autoptr(GError) tx_err = nullptr;
     g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
     if (!tx) {
-        Logger::error("Impossible d'initialiser la transaction Flatpak.");
-        return true;
+        std::string err_msg = std::string("Impossible d'initialiser la transaction Flatpak : ") + (tx_err ? tx_err->message : "inconnu");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
+        return false;
     }
     // Formater le ref (ex: app/org.videolan.VLC/x86_64/stable)
     const char* default_arch = flatpak_get_default_arch();
     std::string full_ref = "app/" + chosen.id + "/" + (default_arch ? default_arch : "x86_64") + "/stable";
     g_autoptr(GError) add_err = nullptr;
     if (!flatpak_transaction_add_install(tx, chosen.origin.c_str(), full_ref.c_str(), nullptr, &add_err)) {
-        Logger::error(std::string("Erreur préparation Flatpak : ") + (add_err ? add_err->message : "inconnue"));
-        return true;
+        std::string err_msg = std::string("Erreur préparation Flatpak : ") + (add_err ? add_err->message : "inconnue");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
+        return false;
     }
-    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
+
+    // Connexion aux événements de progression Flatpak
+    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress* progress, gpointer) {
         const char* r = flatpak_transaction_operation_get_ref(op);
-        Logger::info(std::string("Installation en cours : ") + (r ? r : ""));
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info(std::string("Installation en cours : ") + (r ? r : ""));
+        }
+        if (progress) {
+            flatpak_transaction_progress_set_update_frequency(progress, 250);
+            g_signal_connect(progress, "changed", G_CALLBACK(+[](FlatpakTransactionProgress* p, gpointer) {
+                if (ProgressEmitter::is_enabled()) {
+                    int p_val = flatpak_transaction_progress_get_progress(p);
+                    // Progression globale mappée de 15% à 95%
+                    int global_pct = 15 + static_cast<int>(p_val * 0.80);
+                    char* status = flatpak_transaction_progress_get_status(p);
+                    std::string msg = (status && strlen(status) > 0) ? status : "Téléchargement et installation Flatpak...";
+                    g_free(status);
+                    ProgressEmitter::emit(global_pct, msg);
+                }
+            }), nullptr);
+        }
     }), nullptr);
-    Logger::info("Téléchargement et installation de l'application...");
+
+    if (!ProgressEmitter::is_enabled()) {
+        Logger::info("Téléchargement et installation de l'application...");
+    }
     g_autoptr(GError) run_err = nullptr;
     if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
-        Logger::error(std::string("Échec de l'installation Flatpak : ") + (run_err ? run_err->message : "inconnue"));
-        return true;
+        std::string err_msg = std::string("Échec de l'installation Flatpak : ") + (run_err ? run_err->message : "inconnue");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
+        return false;
     }
-    Logger::success("Application Flatpak '" + chosen.id + "' installée avec succès !");
+    ProgressEmitter::emit(100, "Installation de " + chosen.name + " terminée avec succès");
+    if (!ProgressEmitter::is_enabled()) {
+        Logger::success("Application Flatpak '" + chosen.id + "' installée avec succès !");
+    }
     return true;
 }
 

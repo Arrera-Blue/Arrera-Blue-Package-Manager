@@ -1,4 +1,5 @@
 #include "abpm/core/logger.hpp"
+#include "abpm/core/progress_emitter.hpp"
 #include "abpm/cli/cli_parser.hpp"
 #include "abpm/flatpak/flatpak_backend.hpp"
 #include "abpm/dnf/dnf_backend.hpp"
@@ -10,6 +11,7 @@
 #include <iostream>
 
 using abpm::core::Logger;
+using abpm::core::ProgressEmitter;
 using abpm::cli::CliParser;
 using abpm::cli::CommandType;
 using abpm::cli::SourceFilter;
@@ -22,6 +24,9 @@ using abpm::list::ListBackend;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
+    if (options.progress) {
+        ProgressEmitter::set_enabled(true);
+    }
 
     switch (options.command) {
         case CommandType::HELP:
@@ -262,61 +267,106 @@ int main(int argc, char* argv[]) {
 
          case CommandType::INSTALL: {
             if (options.arguments.empty()) {
-                Logger::error("Spécifiez un paquet ou une application à installer (ex: abpm install vlc)");
+                if (ProgressEmitter::is_enabled()) {
+                    ProgressEmitter::emit_error("Aucun paquet spécifié pour l'installation.");
+                } else {
+                    Logger::error("Spécifiez un paquet ou une application à installer (ex: abpm install vlc)");
+                }
                 return 1;
             }
             const auto& pkg_name = options.arguments[0];
-            Logger::banner();
-            Logger::info("Préparation de l'installation de '" + pkg_name + "'...");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::banner();
+                Logger::info("Préparation de l'installation de '" + pkg_name + "'...");
+            } else {
+                ProgressEmitter::emit(0, "Démarrage de l'installation de " + pkg_name + "...");
+            }
             bool handled = false;
             // Cas 0 : Installation d'un fichier RPM local (--rpm)
             if (options.filter == SourceFilter::RPM) {
-                Logger::info("Installation du fichier RPM local : " + pkg_name);
-                DnfBackend::install_local_rpm(pkg_name, options.assumeyes);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Installation du fichier RPM local : " + pkg_name);
+                }
+                if (!DnfBackend::install_local_rpm(pkg_name, options.assumeyes)) {
+                    return 1;
+                }
                 handled = true;
             }
             // Cas 0.5 : Installation d'une AppImage (--appimage)
             else if (options.filter == SourceFilter::APPIMAGE) {
-                Logger::info("Installation du fichier AppImage : " + pkg_name);
-                AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Installation du fichier AppImage : " + pkg_name);
+                }
+                if (!AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon)) {
+                    return 1;
+                }
                 handled = true;
             }
             // Cas 0.8 : Installation d'une archive Tar / Zip (--tar)
             else if (options.filter == SourceFilter::TAR) {
-                Logger::info("Installation du fichier d'archive : " + pkg_name);
-                ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Installation du fichier d'archive : " + pkg_name);
+                }
+                if (!ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon)) {
+                    return 1;
+                }
                 handled = true;
             }
             // Cas 1 : Forcer DNF (--dnf)
             else if (options.filter == SourceFilter::DNF) {
-                Logger::info("Recherche dans les dépôts DNF...");
-                if (!DnfBackend::install(pkg_name, options.assumeyes)) {
-                    Logger::error("Le paquet '" + pkg_name + "' est introuvable dans DNF.");
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Recherche dans les dépôts DNF...");
                 }
-                handled = true;
-            }
-            // Cas 2 : Forcer Flatpak (--flatpak)
-            else if (options.filter == SourceFilter::FLATPAK) {
-                Logger::info("Recherche sur Flathub / Flatpak...");
-                if (!FlatpakBackend::install(pkg_name, options.assumeyes)) {
-                    Logger::error("L'application '" + pkg_name + "' est introuvable sur Flathub.");
-                }
-                handled = true;
-            }
-            // Cas 3 : Cascade intelligente par défaut (DNF en priorité, puis Flathub)
-            else {
-                Logger::info("Recherche en priorité dans les dépôts DNF...");
                 if (DnfBackend::install(pkg_name, options.assumeyes)) {
                     handled = true;
                 } else {
-                    Logger::info("Introuvable dans DNF. Recherche sur Flathub...");
+                    std::string err_msg = "Le paquet '" + pkg_name + "' est introuvable dans DNF.";
+                    ProgressEmitter::emit_error(err_msg);
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::error(err_msg);
+                    }
+                    return 1;
+                }
+            }
+            // Cas 2 : Forcer Flatpak (--flatpak)
+            else if (options.filter == SourceFilter::FLATPAK) {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Recherche sur Flathub / Flatpak...");
+                }
+                if (FlatpakBackend::install(pkg_name, options.assumeyes)) {
+                    handled = true;
+                } else {
+                    std::string err_msg = "L'application '" + pkg_name + "' est introuvable sur Flathub.";
+                    ProgressEmitter::emit_error(err_msg);
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::error(err_msg);
+                    }
+                    return 1;
+                }
+            }
+            // Cas 3 : Cascade intelligente par défaut (DNF en priorité, puis Flathub)
+            else {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("Recherche en priorité dans les dépôts DNF...");
+                }
+                if (DnfBackend::install(pkg_name, options.assumeyes)) {
+                    handled = true;
+                } else {
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::info("Introuvable dans DNF. Recherche sur Flathub...");
+                    }
                     if (FlatpakBackend::install(pkg_name, options.assumeyes)) {
                         handled = true;
                     }
                 }
             }
             if (!handled) {
-                Logger::error("Le paquet ou l'application '" + pkg_name + "' est introuvable ni dans DNF ni sur Flathub.");
+                std::string err_msg = "Le paquet ou l'application '" + pkg_name + "' est introuvable ni dans DNF ni sur Flathub.";
+                ProgressEmitter::emit_error(err_msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::error(err_msg);
+                }
+                return 1;
             }
             break;
         }

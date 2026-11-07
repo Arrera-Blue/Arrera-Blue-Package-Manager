@@ -2,10 +2,16 @@
 
 ## Arguments et Commandes
 
-### Update
+### Update & Check
 
 - `update` : Met à jour les dépôts et effectue toutes les mises à jour.
+- `update [PAQUET...]` : Met à jour un ou plusieurs paquets ou applications ciblés.
+- `update --dnf [PAQUET...]` : Met à jour uniquement les paquets DNF (tous ou paquets ciblés).
+- `update --flatpak [APPLICATION...]` : Met à jour uniquement les applications Flatpak (toutes ou ciblées).
+- `update [OPTIONS] --progress [PAQUET...]` : Émet le flux de progression en temps réel non tamponné (`PROGRESS:<0-100>:<ETAPE>`) pour Blue Hub.
 - `check` : Met à jour les dépôts et affiche la liste des applications à mettre à jour, peu importe si elles proviennent de Flathub ou de DNF.
+- `check --json` : Sortie brute en JSON standardisé sur `stdout` pour **Blue Hub** avec classification automatique (`app`, `utility`, `system`).
+- `check --json --dnf` / `check --json --flatpak` : Vérifie les mises à jour pour une source spécifique en sortie JSON.
 
 ### Install
 

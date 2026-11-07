@@ -98,16 +98,31 @@ cmake --build build -j$(nproc)
 ### 1. System Updates
 
 #### `abpm update`
-Synchronizes repositories and upgrades all eligible DNF packages and Flatpak runtimes/applications in a single pass.
+Synchronizes repositories and upgrades packages. Supports targeted updates, source filters, and real-time GUI progress streaming for **Blue Hub**.
 ```bash
+# Global system update
 abpm update
 abpm update -y    # Bypass confirmation prompts
+
+# Targeted updates (specific packages or applications)
+abpm update --dnf firefox less
+abpm update --flatpak org.mozilla.firefox
+
+# Real-time progress output for GUI integrations (Blue Hub)
+abpm update -y --progress --dnf firefox
+abpm update -y --progress --flatpak org.mozilla.firefox
 ```
 
 #### `abpm check`
-Refreshes repository metadata and displays a combined overview of all pending updates from both DNF and Flatpak without modifying the system.
+Refreshes repository metadata and displays pending updates. Supports `--json` machine-readable output categorized into `app`, `utility`, and `system` components.
 ```bash
+# Human-readable summary
 abpm check
+
+# Machine-readable JSON output for Blue Hub
+abpm check --json
+abpm check --json --dnf
+abpm check --json --flatpak
 ```
 
 #### `abpm clean [all | expire-cache | packages]`

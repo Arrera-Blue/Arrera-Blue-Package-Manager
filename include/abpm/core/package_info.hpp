@@ -22,15 +22,18 @@ struct PackageInfo {
 };
 
 struct UpdateInfo {
-    std::string name;
-    std::string id;
-    std::string current_ver;
-    std::string new_ver;
-    std::string arch;
-    PackageSource source;
-    std::string origin;
+    std::string name;          // Nom lisible affiché à l'utilisateur (ex: "Firefox", "Noyau Linux")
+    std::string id;            // ID unique (ex: "org.mozilla.firefox" ou "kernel-core")
+    std::string category;      // "app", "utility", ou "system"
+    std::string current_ver;   // Version installée
+    std::string new_ver;       // Nouvelle version disponible
+    std::string arch;          // Architecture (ex: "x86_64")
+    PackageSource source;      // DNF, FLATPAK
+    std::string origin;        // Dépôt d'origine (ex: "updates", "flathub")
+    std::string package;       // Nom exact pour la mise à jour (paquet RPM ou ref Flatpak)
+    std::string icon;          // Nom ou chemin de l'icône (ex: "firefox", "system-component")
+    std::string summary;       // Court résumé descriptif
 };
-
 
 struct InstalledApp {
     std::string id;           

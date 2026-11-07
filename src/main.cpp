@@ -1,5 +1,6 @@
 #include "abpm/core/logger.hpp"
 #include "abpm/core/progress_emitter.hpp"
+#include "abpm/core/categorizer.hpp"
 #include "abpm/cli/cli_parser.hpp"
 #include "abpm/flatpak/flatpak_backend.hpp"
 #include "abpm/dnf/dnf_backend.hpp"
@@ -9,6 +10,7 @@
 #include "abpm/list/list_backend.hpp"
 #include <iomanip>
 #include <iostream>
+#include <sstream> 
 
 using abpm::core::Logger;
 using abpm::core::ProgressEmitter;
@@ -21,6 +23,7 @@ using abpm::appimage::AppImageBackend;
 using abpm::archive::ArchiveBackend;
 using abpm::discover::DiscoverBackend;
 using abpm::list::ListBackend;
+using abpm::core::Categorizer;
 
 int main(int argc, char* argv[]) {
     auto options = CliParser::parse(argc, argv);
@@ -155,19 +158,24 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        case CommandType::CHECK: {
-            Logger::banner();
-            Logger::info("Vérification des mises à jour disponibles...");
+                case CommandType::CHECK: {
+            std::vector<abpm::core::UpdateInfo> dnf_updates;
+            std::vector<abpm::core::UpdateInfo> flatpak_updates;
 
-            size_t total_updates = 0;
+            // En mode terminal classique, on affiche la bannière
+            if (!options.json_output) {
+                Logger::banner();
+                Logger::info("Vérification des mises à jour disponibles...");
+            }
 
             // 1. Vérification DNF
             if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
-                Logger::info("Vérification des paquets DNF (RPM)...");
-                auto dnf_updates = DnfBackend::check_updates();
-                total_updates += dnf_updates.size();
+                if (!options.json_output) {
+                    Logger::info("Vérification des paquets DNF (RPM)...");
+                }
+                dnf_updates = DnfBackend::check_updates(options.json_output);
 
-                if (!dnf_updates.empty()) {
+                if (!options.json_output && !dnf_updates.empty()) {
                     std::cout << "\n--- Mises à jour DNF (" << dnf_updates.size() << ") ---\n";
                     for (const auto& up : dnf_updates) {
                         std::cout << " • " << std::left << std::setw(30) << up.name
@@ -179,11 +187,12 @@ int main(int argc, char* argv[]) {
 
             // 2. Vérification Flatpak
             if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
-                Logger::info("Vérification des applications Flatpak...");
-                auto flatpak_updates = FlatpakBackend::check_updates();
-                total_updates += flatpak_updates.size();
+                if (!options.json_output) {
+                    Logger::info("Vérification des applications Flatpak...");
+                }
+                flatpak_updates = FlatpakBackend::check_updates();
 
-                if (!flatpak_updates.empty()) {
+                if (!options.json_output && !flatpak_updates.empty()) {
                     std::cout << "\n--- Mises à jour Flatpak (" << flatpak_updates.size() << ") ---\n";
                     for (const auto& up : flatpak_updates) {
                         std::cout << " • " << std::left << std::setw(32) << up.name
@@ -192,6 +201,37 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // 3. Sortie JSON pour Blue Hub
+            if (options.json_output) {
+                std::vector<abpm::core::UpdateInfo> all_updates;
+                all_updates.insert(all_updates.end(), dnf_updates.begin(), dnf_updates.end());
+                all_updates.insert(all_updates.end(), flatpak_updates.begin(), flatpak_updates.end());
+
+                std::stringstream ss;
+                ss << "[\n";
+                for (size_t i = 0; i < all_updates.size(); ++i) {
+                    const auto& up = all_updates[i];
+                    std::string src_str = (up.source == abpm::core::PackageSource::DNF) ? "dnf" : "flatpak";
+
+                    ss << "  {\n";
+                    ss << "    \"id\": \"" << Categorizer::escape_json(up.id) << "\",\n";
+                    ss << "    \"name\": \"" << Categorizer::escape_json(up.name) << "\",\n";
+                    ss << "    \"category\": \"" << Categorizer::escape_json(up.category) << "\",\n";
+                    ss << "    \"current_version\": \"" << Categorizer::escape_json(up.current_ver) << "\",\n";
+                    ss << "    \"new_version\": \"" << Categorizer::escape_json(up.new_ver) << "\",\n";
+                    ss << "    \"source\": \"" << src_str << "\",\n";
+                    ss << "    \"package\": \"" << Categorizer::escape_json(up.package) << "\",\n";
+                    ss << "    \"icon\": \"" << Categorizer::escape_json(up.icon) << "\",\n";
+                    ss << "    \"summary\": \"" << Categorizer::escape_json(up.summary) << "\"\n";
+                    ss << "  }" << (i + 1 < all_updates.size() ? ",\n" : "\n");
+                }
+                ss << "]\n";
+                std::cout << ss.str() << std::flush;
+                break;
+            }
+
+            // 4. Bilan en mode terminal classique
+            size_t total_updates = dnf_updates.size() + flatpak_updates.size();
             std::cout << "\n";
             if (total_updates == 0) {
                 Logger::success("Tous les paquets et applications sont à jour !");
@@ -203,64 +243,135 @@ int main(int argc, char* argv[]) {
         }
 
         case CommandType::UPDATE: {
-            Logger::banner();
-            Logger::info("Vérification des mises à jour à appliquer...");
-            std::vector<abpm::core::UpdateInfo> dnf_updates;
-            std::vector<abpm::core::UpdateInfo> flatpak_updates;
-            // 1. Détecter les mises à jour DNF
-            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF) {
-                dnf_updates = DnfBackend::check_updates();
+            if (options.progress) {
+                ProgressEmitter::set_enabled(true);
             }
-            // 2. Détecter les mises à jour Flatpak
-            if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
-                flatpak_updates = FlatpakBackend::check_updates();
-            }
-            size_t total = dnf_updates.size() + flatpak_updates.size();
-            if (total == 0) {
-                Logger::success("Tous les paquets et applications sont déjà à jour !");
+
+            const auto& targets = options.arguments;
+
+            // 1. Cas ciblé DNF (--dnf)
+            if (options.filter == SourceFilter::DNF) {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::banner();
+                    Logger::info("Mise à jour DNF en cours...");
+                }
+                bool ok = DnfBackend::update(targets);
+                if (!ok) return 1;
                 break;
             }
-            // Afficher le récapitulatif
-            if (!dnf_updates.empty()) {
-                std::cout << "\n--- Mises à jour DNF (" << dnf_updates.size() << ") ---\n";
-                for (const auto& up : dnf_updates) {
-                    std::cout << " • " << std::left << std::setw(30) << up.name
-                              << " " << up.current_ver << " -> " << up.new_ver << "\n";
+
+            // 2. Cas ciblé Flatpak (--flatpak)
+            if (options.filter == SourceFilter::FLATPAK) {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::banner();
+                    Logger::info("Mise à jour Flatpak en cours...");
+                }
+                bool ok = FlatpakBackend::update(targets);
+                if (!ok) return 1;
+                break;
+            }
+
+            // 3. Cas paquets spécifiés sans filtre explicite
+            if (!targets.empty()) {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::banner();
+                    Logger::info("Application des mises à jour spécifiées...");
+                }
+
+                std::vector<std::string> dnf_targets;
+                std::vector<std::string> flatpak_targets;
+
+                for (const auto& t : targets) {
+                    if (t.find('.') != std::string::npos || t.find('/') != std::string::npos) {
+                        flatpak_targets.push_back(t);
+                    } else {
+                        dnf_targets.push_back(t);
+                    }
+                }
+
+                bool all_ok = true;
+                if (!dnf_targets.empty()) {
+                    all_ok = DnfBackend::update(dnf_targets) && all_ok;
+                }
+                if (!flatpak_targets.empty()) {
+                    all_ok = FlatpakBackend::update(flatpak_targets) && all_ok;
+                }
+                if (!all_ok) return 1;
+                break;
+            }
+
+            // 4. Cas mise à jour globale (aucun paquet ciblé)
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::banner();
+                Logger::info("Vérification des mises à jour à appliquer...");
+            }
+            std::vector<abpm::core::UpdateInfo> dnf_updates;
+            std::vector<abpm::core::UpdateInfo> flatpak_updates;
+            dnf_updates = DnfBackend::check_updates(true);
+            flatpak_updates = FlatpakBackend::check_updates();
+
+            size_t total = dnf_updates.size() + flatpak_updates.size();
+            if (total == 0) {
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::success("Tous les paquets et applications sont déjà à jour !");
+                }
+                ProgressEmitter::emit(100, "Tous les paquets et applications sont déjà à jour");
+                break;
+            }
+
+            if (!ProgressEmitter::is_enabled()) {
+                // Afficher le récapitulatif
+                if (!dnf_updates.empty()) {
+                    std::cout << "\n--- Mises à jour DNF (" << dnf_updates.size() << ") ---\n";
+                    for (const auto& up : dnf_updates) {
+                        std::cout << " • " << std::left << std::setw(30) << up.name
+                                  << " " << up.current_ver << " -> " << up.new_ver << "\n";
+                    }
+                }
+                if (!flatpak_updates.empty()) {
+                    std::cout << "\n--- Mises à jour Flatpak (" << flatpak_updates.size() << ") ---\n";
+                    for (const auto& up : flatpak_updates) {
+                        std::cout << " • " << std::left << std::setw(32) << up.name
+                                  << " [" << up.id << "]\n";
+                    }
+                }
+                std::cout << "\n";
+                // Demande de confirmation si l'option -y n'est pas passée
+                if (!options.assumeyes) {
+                    if (!Logger::confirm("Voulez-vous appliquer ces " + std::to_string(total) + " mise(s) à jour ?")) {
+                        Logger::info("Opération annulée par l'utilisateur.");
+                        break;
+                    }
+                } else {
+                    Logger::info("Option -y détectée : validation automatique.");
                 }
             }
-            if (!flatpak_updates.empty()) {
-                std::cout << "\n--- Mises à jour Flatpak (" << flatpak_updates.size() << ") ---\n";
-                for (const auto& up : flatpak_updates) {
-                    std::cout << " • " << std::left << std::setw(32) << up.name
-                              << " [" << up.id << "]\n";
-                }
-            }
-            std::cout << "\n";
-            // Demande de confirmation si l'option -y n'est pas passée
-            if (!options.assumeyes) {
-                if (!Logger::confirm("Voulez-vous appliquer ces " + std::to_string(total) + " mise(s) à jour ?")) {
-                    Logger::info("Opération annulée par l'utilisateur.");
-                    break;
-                }
-            } else {
-                Logger::info("Option -y détectée : validation automatique.");
-            }
-            // Application des mises à jour
+
             bool dnf_ok = true;
             bool flatpak_ok = true;
             if (!dnf_updates.empty()) {
-                Logger::info("\n--- Application des paquets DNF ---");
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("\n--- Application des paquets DNF ---");
+                }
                 dnf_ok = DnfBackend::update();
             }
             if (!flatpak_updates.empty()) {
-                Logger::info("\n--- Application des paquets Flatpak ---");
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::info("\n--- Application des paquets Flatpak ---");
+                }
                 flatpak_ok = FlatpakBackend::update();
             }
-            std::cout << "\n";
-            if (dnf_ok && flatpak_ok) {
-                Logger::success("Toutes les mises à jour ont été appliquées avec succès !");
-            } else {
-                Logger::warning("Certaines opérations de mise à jour n'ont pas pu aboutir.");
+
+            if (!ProgressEmitter::is_enabled()) {
+                std::cout << "\n";
+                if (dnf_ok && flatpak_ok) {
+                    Logger::success("Toutes les mises à jour ont été appliquées avec succès !");
+                } else {
+                    Logger::warning("Certaines opérations de mise à jour n'ont pas pu aboutir.");
+                }
+            }
+            if (!dnf_ok || !flatpak_ok) {
+                return 1;
             }
             break;
         }

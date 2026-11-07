@@ -1,18 +1,23 @@
 #include "abpm/flatpak/flatpak_backend.hpp"
 #include "abpm/core/logger.hpp"
 #include "abpm/core/progress_emitter.hpp"
+#include "abpm/core/categorizer.hpp"
 #include <flatpak.h>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <filesystem>
 
 namespace abpm::flatpak {
+
+    namespace fs = std::filesystem;
 
 using core::PackageInfo;
 using core::PackageSource;
 using core::Logger;
 using core::UpdateInfo;
 using core::ProgressEmitter;
+using core::Categorizer;
 
 static void collect_from_installation(FlatpakInstallation* installation, 
                                       const std::string& origin_label,
@@ -122,24 +127,78 @@ static void collect_updates_from_installation(FlatpakInstallation* inst,
     g_autoptr(GError) err = nullptr;
     g_autoptr(GPtrArray) refs = flatpak_installation_list_installed_refs_for_update(inst, nullptr, &err);
     if (!refs) return;
+
+    const char* home = std::getenv("HOME");
+    std::string home_str = home ? home : "";
+
     for (guint i = 0; i < refs->len; ++i) {
         auto* ref = FLATPAK_INSTALLED_REF(g_ptr_array_index(refs, i));
         const char* raw_id = flatpak_ref_get_name(FLATPAK_REF(ref));
         const char* raw_name = flatpak_installed_ref_get_appdata_name(ref);
         const char* raw_ver = flatpak_installed_ref_get_appdata_version(ref);
+        const char* raw_summary = flatpak_installed_ref_get_appdata_summary(ref);
         const char* origin = flatpak_installed_ref_get_origin(ref);
         const char* arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+        FlatpakRefKind kind = flatpak_ref_get_kind(FLATPAK_REF(ref));
+
         UpdateInfo info;
-        info.id = raw_id ? raw_id : "";
-        info.name = raw_name ? raw_name : info.id;
+        std::string id = raw_id ? raw_id : "";
+        info.id = id;
+        info.package = id;
         info.current_ver = raw_ver ? raw_ver : "actuelle";
-        info.new_ver = "mise à jour dispo";
+        info.new_ver = "disponible";
         info.arch = arch ? arch : "";
         info.source = PackageSource::FLATPAK;
         info.origin = origin ? origin : default_origin;
+
+        // Détection runtimes / composants système
+        if (kind == FLATPAK_REF_KIND_RUNTIME || id.find("Platform") != std::string::npos ||
+            id.find(".Locale") != std::string::npos || id.find("Sdk") != std::string::npos) {
+            info.category = "system";
+            if (id.find(".Locale") != std::string::npos) {
+                info.icon = "preferences-desktop-locale";
+                info.summary = "Fichiers linguistiques de l'application";
+                size_t last_dot = id.rfind(".Locale");
+                std::string base_id = id.substr(0, last_dot);
+                size_t prev_dot = base_id.rfind('.');
+                std::string app_part = (prev_dot != std::string::npos) ? base_id.substr(prev_dot + 1) : base_id;
+                info.name = (raw_name && strlen(raw_name) > 0) ? (std::string(raw_name) + " (Traductions)") : (app_part + " (Traductions)");
+            } else {
+                info.icon = "system-component";
+                info.summary = raw_summary ? raw_summary : ("Composant d'exécution Flatpak (" + id + ")");
+                info.name = (raw_name && strlen(raw_name) > 0) ? raw_name : id;
+            }
+        } else {
+            // Application Flatpak (FLATPAK_REF_KIND_APP)
+            core::DesktopMeta meta;
+            fs::path sys_desktop = "/var/lib/flatpak/exports/share/applications/" + id + ".desktop";
+            fs::path user_desktop = home_str + "/.local/share/flatpak/exports/share/applications/" + id + ".desktop";
+
+            bool parsed = false;
+            if (fs::exists(sys_desktop)) {
+                parsed = Categorizer::parse_desktop_file(sys_desktop, meta);
+            } else if (!home_str.empty() && fs::exists(user_desktop)) {
+                parsed = Categorizer::parse_desktop_file(user_desktop, meta);
+            }
+
+            if (parsed) {
+                info.name = (raw_name && strlen(raw_name) > 0) ? raw_name : meta.name;
+                info.category = meta.category; // "utility" ou "app"
+                info.icon = !meta.icon.empty() ? meta.icon : id;
+                info.summary = raw_summary ? raw_summary : (!meta.summary.empty() ? meta.summary : "Application Flatpak");
+            } else {
+                info.name = (raw_name && strlen(raw_name) > 0) ? raw_name : id;
+                info.category = "app";
+                info.icon = id;
+                info.summary = raw_summary ? raw_summary : "Application Flatpak";
+            }
+        }
+
         out_updates.push_back(std::move(info));
     }
 }
+
+
 std::vector<UpdateInfo> FlatpakBackend::check_updates() {
     std::vector<UpdateInfo> updates;
     // 1. Mises à jour système
@@ -153,62 +212,124 @@ std::vector<UpdateInfo> FlatpakBackend::check_updates() {
     return updates;
 }
 
-bool FlatpakBackend::update() {
+bool FlatpakBackend::update(const std::vector<std::string>& target_apps) {
+    ProgressEmitter::emit(0, "Initialisation de la mise à jour Flatpak...");
+
     g_autoptr(GError) err = nullptr;
     g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
     if (!inst) {
-        Logger::error(std::string("Erreur d'accès à Flatpak : ") + (err ? err->message : "inconnue"));
+        std::string err_msg = std::string("Erreur d'accès à Flatpak : ") + (err ? err->message : "inconnue");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
         return false;
     }
 
+    ProgressEmitter::emit(10, "Recherche des mises à jour Flatpak...");
     // Récupérer les paquets à mettre à jour
     g_autoptr(GError) refs_err = nullptr;
     g_autoptr(GPtrArray) refs = flatpak_installation_list_installed_refs_for_update(inst, nullptr, &refs_err);
     if (!refs || refs->len == 0) {
-        Logger::success("Toutes les applications Flatpak sont déjà à jour !");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::success("Toutes les applications Flatpak sont déjà à jour !");
+        }
+        ProgressEmitter::emit(100, "Toutes les applications Flatpak sont déjà à jour");
         return true;
     }
 
     g_autoptr(GError) tx_err = nullptr;
     g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
     if (!tx) {
-        Logger::error(std::string("Impossible d'initialiser la transaction Flatpak : ") + (tx_err ? tx_err->message : ""));
+        std::string err_msg = std::string("Impossible d'initialiser la transaction Flatpak : ") + (tx_err ? tx_err->message : "");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
         return false;
     }
 
-    // Ajouter chaque mise à jour à la transaction
+    ProgressEmitter::emit(15, "Préparation de la transaction Flatpak...");
+
+    // Si des cibles sont spécifiées, filtrer les refs correspondantes
+    size_t matched_count = 0;
     for (guint i = 0; i < refs->len; ++i) {
         auto* ref = FLATPAK_INSTALLED_REF(g_ptr_array_index(refs, i));
         const char* formatted_ref = flatpak_ref_format_ref_cached(FLATPAK_REF(ref));
+        const char* name = flatpak_ref_get_name(FLATPAK_REF(ref));
         if (!formatted_ref) continue;
+
+        if (!target_apps.empty()) {
+            bool matches = false;
+            for (const auto& target : target_apps) {
+                if (name && (target == name || std::string(name).ends_with("." + target) || target == formatted_ref)) {
+                    matches = true;
+                    break;
+                }
+            }
+            if (!matches) continue;
+        }
 
         g_autoptr(GError) add_err = nullptr;
         if (!flatpak_transaction_add_update(tx, formatted_ref, nullptr, nullptr, &add_err)) {
-            if (add_err) {
+            if (add_err && !ProgressEmitter::is_enabled()) {
                 Logger::warning(std::string("Impossible d'ajouter ") + formatted_ref + " : " + add_err->message);
             }
+        } else {
+            matched_count++;
         }
     }
 
-    if (flatpak_transaction_is_empty(tx)) {
-        Logger::success("Aucune mise à jour requise pour Flatpak.");
-        return true;
-    }
-
-    // Afficher chaque opération en cours
-    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
-        const char* r = flatpak_transaction_operation_get_ref(op);
-        Logger::info(std::string("Mise à jour en cours : ") + (r ? r : ""));
-    }), nullptr);
-
-    Logger::info("Exécution de la transaction Flatpak...");
-    g_autoptr(GError) run_err = nullptr;
-    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
-        Logger::error(std::string("Échec de la transaction Flatpak : ") + (run_err ? run_err->message : ""));
+    if (!target_apps.empty() && matched_count == 0) {
+        std::string err_msg = "Aucune mise à jour disponible pour les applications Flatpak spécifiées.";
+        ProgressEmitter::emit_error(err_msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(err_msg);
+        }
         return false;
     }
 
-    Logger::success("Mises à jour Flatpak appliquées avec succès !");
+    if (flatpak_transaction_is_empty(tx)) {
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::success("Aucune mise à jour requise pour Flatpak.");
+        }
+        ProgressEmitter::emit(100, "Aucune mise à jour requise pour Flatpak");
+        return true;
+    }
+
+    // Afficher chaque opération en cours et brancher le suivi de progression
+    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress* progress, gpointer) {
+        const char* r = flatpak_transaction_operation_get_ref(op);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info(std::string("Mise à jour en cours : ") + (r ? r : ""));
+        }
+        if (progress) {
+            flatpak_transaction_progress_set_update_frequency(progress, 250);
+            g_signal_connect(progress, "changed", G_CALLBACK(+[](FlatpakTransactionProgress* p, gpointer) {
+                if (ProgressEmitter::is_enabled()) {
+                    int p_val = flatpak_transaction_progress_get_progress(p);
+                    // Progression de 15% à 95%
+                    int global_pct = 15 + static_cast<int>(p_val * 0.80);
+                    char* status = flatpak_transaction_progress_get_status(p);
+                    std::string msg = (status && strlen(status) > 0) ? status : "Mise à jour Flatpak en cours...";
+                    g_free(status);
+                    ProgressEmitter::emit(global_pct, msg);
+                }
+            }), nullptr);
+        }
+    }), nullptr);
+
+    if (!ProgressEmitter::is_enabled()) {
+        Logger::info("Exécution de la transaction Flatpak...");
+    }
+    g_autoptr(GError) run_err = nullptr;
+    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
+        std::string err_msg = std::string("Échec de la transaction Flatpak : ") + (run_err ? run_err->message : "");
+        ProgressEmitter::emit_error(err_msg);
+        Logger::error(err_msg);
+        return false;
+    }
+
+    ProgressEmitter::emit(100, "Mises à jour Flatpak appliquées avec succès");
+    if (!ProgressEmitter::is_enabled()) {
+        Logger::success("Mises à jour Flatpak appliquées avec succès !");
+    }
     return true;
 }
 

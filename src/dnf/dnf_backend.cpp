@@ -1,6 +1,7 @@
 #include "abpm/dnf/dnf_backend.hpp"
 #include "abpm/core/logger.hpp"
 #include "abpm/core/progress_emitter.hpp"
+#include "abpm/core/categorizer.hpp"
 #include <libdnf5/base/base.hpp>
 #include <libdnf5/repo/repo_sack.hpp>
 #include <libdnf5/repo/repo_query.hpp>
@@ -30,6 +31,7 @@ using core::PackageSource;
 using core::UpdateInfo;
 using core::Logger;
 using core::ProgressEmitter;
+using core::Categorizer;
 
 namespace {
 
@@ -222,7 +224,7 @@ std::vector<PackageInfo> DnfBackend::search(std::string_view term) {
     return results;
 }
 
-std::vector<UpdateInfo> DnfBackend::check_updates() {
+std::vector<UpdateInfo> DnfBackend::check_updates(bool silent) {
     std::vector<UpdateInfo> updates;
     try {
         libdnf5::Base base;
@@ -236,6 +238,9 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
         goal.add_rpm_upgrade();
         auto transaction = goal.resolve();
 
+        // Indexation préalable des fichiers .desktop système pour catégorisation et métadonnées
+        auto desktop_index = Categorizer::index_desktop_directory("/usr/share/applications");
+
         // Récupérer les paquets qui sont réellement dans la transaction de mise à jour résolue
         std::unordered_map<std::string, UpdateInfo> unique_updates;
 
@@ -247,12 +252,57 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
                 std::string name = pkg.get_name();
                 if (unique_updates.find(name) == unique_updates.end()) {
                     UpdateInfo info;
-                    info.name = name;
-                    info.id = pkg.get_nevra();
+                    info.package = name;
                     info.new_ver = pkg.get_evr();
                     info.arch = pkg.get_arch();
                     info.source = PackageSource::DNF;
                     info.origin = "dnf";
+
+                    // Détection des métadonnées via .desktop (si présent)
+                    auto it = desktop_index.find(name);
+                    if (it == desktop_index.end()) {
+                        // Recherche si un .desktop se termine par .name (ex: org.gnome.Name)
+                        for (const auto& [did, dmeta] : desktop_index) {
+                            if (did == name || did.ends_with("." + name) || dmeta.exec == name) {
+                                it = desktop_index.find(did);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (it != desktop_index.end()) {
+                        const auto& d = it->second;
+                        info.id = d.id;
+                        info.name = d.name;
+                        info.category = d.category; // "utility" ou "app"
+                        info.icon = d.icon.empty() ? name : d.icon;
+                        info.summary = !d.summary.empty() ? d.summary : pkg.get_summary();
+                    } else {
+                        // Aucun fichier .desktop : vérification utilitaires CLI connus ou composant système
+                        const std::unordered_set<std::string> known_utilities = {
+                            "less", "nano", "vim", "tmux", "git", "curl", "wget", "tree", "rsync", "zip", "unzip"
+                        };
+
+                        info.id = name;
+                        if (known_utilities.find(name) != known_utilities.end()) {
+                            info.name = name;
+                            info.category = "utility";
+                            info.icon = "utilities-terminal";
+                            info.summary = pkg.get_summary();
+                        } else {
+                            info.category = "system";
+                            info.icon = "system-component";
+                            if (name.starts_with("kernel")) {
+                                info.name = "Noyau Linux (" + name + ")";
+                            } else {
+                                info.name = name;
+                            }
+                            info.summary = pkg.get_summary();
+                            if (info.summary.empty()) {
+                                info.summary = "Composant central du système d'exploitation";
+                            }
+                        }
+                    }
 
                     auto replaced = trans_pkg.get_replaces();
                     if (!replaced.empty()) {
@@ -279,7 +329,7 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
 
         // Si le solveur a rencontré des dépendances non résolues (mises à jour différées)
         auto logs = transaction.get_resolve_logs_as_strings();
-        if (!logs.empty()) {
+        if (!logs.empty() && !silent && !ProgressEmitter::is_enabled()) {
             Logger::warning("Mise(s) à jour DNF différée(s) (conflit de dépendances, ex: RPM Fusion) :");
             std::unordered_set<std::string> seen;
             for (const auto& log : logs) {
@@ -302,8 +352,11 @@ std::vector<UpdateInfo> DnfBackend::check_updates() {
     }
     return updates;
 }
-bool DnfBackend::update() {
+
+
+bool DnfBackend::update(const std::vector<std::string>& target_packages) {
     try {
+        ProgressEmitter::emit(0, "Initialisation de la mise à jour DNF...");
         libdnf5::Base base;
         base.load_config();
         base.setup();
@@ -311,16 +364,26 @@ bool DnfBackend::update() {
         auto repo_sack = base.get_repo_sack();
         repo_sack->create_repos_from_system_configuration();
         setup_repo_callbacks(base);
+        base.set_download_callbacks(std::make_unique<AbpmDownloadCallbacks>());
         repo_sack->load_repos();
 
+        ProgressEmitter::emit(10, "Vérification des dépendances DNF...");
         libdnf5::Goal goal(base);
-        // Demander la mise à jour de tous les paquets système
-        goal.add_rpm_upgrade();
+
+        if (target_packages.empty()) {
+            // Demander la mise à jour de tous les paquets système
+            goal.add_rpm_upgrade();
+        } else {
+            // Demander la mise à jour des paquets ciblés
+            for (const auto& pkg : target_packages) {
+                goal.add_rpm_upgrade(pkg);
+            }
+        }
 
         auto transaction = goal.resolve();
 
         auto logs = transaction.get_resolve_logs_as_strings();
-        if (!logs.empty()) {
+        if (!logs.empty() && !ProgressEmitter::is_enabled()) {
             Logger::warning("Conflit(s) de dépendance détecté(s) lors de la résolution :");
             std::unordered_set<std::string> seen;
             for (const auto& log : logs) {
@@ -340,40 +403,71 @@ bool DnfBackend::update() {
         }
 
         if (transaction.empty()) {
-            if (!logs.empty()) {
+            if (!target_packages.empty()) {
+                std::string err_msg = "Aucune mise à jour applicable pour les paquets DNF spécifiés.";
+                ProgressEmitter::emit_error(err_msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::error(err_msg);
+                }
+                return false;
+            }
+            if (!logs.empty() && !ProgressEmitter::is_enabled()) {
                 Logger::info("Aucune mise à jour applicable immédiatement (les paquets en conflit sont différés).");
-            } else {
+            } else if (!ProgressEmitter::is_enabled()) {
                 Logger::success("Tous les paquets système DNF sont déjà à jour !");
             }
+            ProgressEmitter::emit(100, "Tous les paquets système DNF sont déjà à jour");
             return true;
         }
 
         auto count = transaction.get_transaction_packages_count();
-        Logger::info(std::string("Paquets RPM à mettre à jour : ") + std::to_string(count));
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info(std::string("Paquets RPM à mettre à jour : ") + std::to_string(count));
+        }
 
         // Vérification des privilèges root pour installer des paquets système
         if (geteuid() != 0) {
-            Logger::warning("Pour installer les mises à jour système DNF, exécutez la commande avec sudo : 'sudo abpm update'");
+            std::string err_msg = "La mise à jour système DNF nécessite les privilèges administrateur (ex: pkexec).";
+            ProgressEmitter::emit_error(err_msg);
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::warning("Pour installer les mises à jour système DNF, exécutez la commande avec sudo : 'sudo abpm update'");
+            }
             return false;
         }
 
-        Logger::info("Téléchargement des paquets RPM...");
+        ProgressEmitter::emit(15, "Téléchargement des paquets RPM...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Téléchargement des paquets RPM...");
+        }
         transaction.download();
 
-        Logger::info("Application des paquets système...");
+        ProgressEmitter::emit(50, "Application des paquets système DNF...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Application des paquets système...");
+        }
         transaction.set_callbacks(std::make_unique<AbpmTransactionCallbacks>());
         auto result = transaction.run();
 
         if (result == libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
-            Logger::success("Mise à jour système DNF terminée avec succès !");
+            ProgressEmitter::emit(100, "Mise à jour système DNF terminée avec succès");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::success("Mise à jour système DNF terminée avec succès !");
+            }
             return true;
         } else {
-            Logger::error("Échec de l'application de la transaction DNF.");
-            log_transaction_errors(transaction, result);
+            ProgressEmitter::emit_error("Échec lors de l'application de la transaction DNF.");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::error("Échec de l'application de la transaction DNF.");
+                log_transaction_errors(transaction, result);
+            }
             return false;
         }
     } catch (const std::exception& e) {
-        Logger::error(std::string("Erreur mise à jour DNF : ") + e.what());
+        std::string err_msg = std::string("Erreur mise à jour DNF : ") + e.what();
+        ProgressEmitter::emit_error(err_msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(err_msg);
+        }
         return false;
     }
 }

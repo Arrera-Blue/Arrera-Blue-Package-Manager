@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.5");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.6");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }

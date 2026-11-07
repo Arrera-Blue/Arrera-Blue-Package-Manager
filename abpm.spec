@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.5
+Version:        2026.1.6
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -76,6 +76,13 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Sat Nov 07 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.6-1
+- Ajout de l'option --json pour abpm check avec categorisation des paquets (app, utility, system) pour Blue Hub.
+- Support des mises a jour ciblees dans abpm update (abpm update [PKG...]).
+- Support complet du flux temps reel --progress dans abpm update.
+- Indexation et extraction automatique des categories XDG depuis les fichiers .desktop.
+- Support des filtres --dnf et --flatpak pour check et update.
+
 * Mon Nov 02 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.5-1
 - Ajout de l'option --progress pour abpm install conforme aux specifications Blue Hub.
 - Émission temps réel non-tamponnée de PROGRESS:<0-100>:<ETAPE> et PROGRESS:ERROR:<MSG>.

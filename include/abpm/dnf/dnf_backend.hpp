@@ -12,8 +12,8 @@ public:
 
     static std::vector<core::PackageInfo> search(std::string_view term);
 
-    static std::vector<core::UpdateInfo> check_updates();
-    static bool update();
+    static std::vector<core::UpdateInfo> check_updates(bool silent = false);
+    static bool update(const std::vector<std::string>& target_packages = {});
     static bool install(std::string_view package_name, bool assumeyes);
     static bool is_installed(std::string_view name);
     static bool is_available(std::string_view package_name);

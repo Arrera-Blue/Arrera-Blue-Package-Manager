@@ -30,7 +30,10 @@
 
 ### Remove
 
-- `remove [PAQUET...]` : Désinstalle les applications, peu importe leur provenance (Flatpak, DNF ou autre). Permet de spécifier plusieurs paquets à la suite comme avec DNF.
+- `remove [PAQUET...]` : Désinstalle les applications, peu importe leur provenance (Flatpak, DNF ou autre). Permet de spécifier plusieurs paquets à la suite comme avec DNF. Retourne le code de sortie `1` en cas d'erreur (paquet introuvable, permissions root manquantes pour une application système, échec d'effacement).
+- `remove --progress [PAQUET...]` : Émet le flux de progression en temps réel (`PROGRESS:<0-100>:<ETAPE>` et `PROGRESS:ERROR:<MSG>`) pour les interfaces graphiques (Blue Hub).
+- `remove --system [PAQUET...]` : Cible explicitement l'environnement système (`/opt/applications`, `/var/lib/abpm`, root requis).
+- `remove --user [PAQUET...]` : Cible explicitement l'environnement utilisateur local (`~/Applications`, `~/.local/share/abpm`).
 
 ### Search
 
@@ -63,6 +66,11 @@
 - `clean` ou `clean all` : Nettoie l'intégralité du cache système DNF (`/var/cache/libdnf5`). *(Nécessite sudo)*
 - `clean expire-cache` : Force l'expiration immédiate du cache local pour actualiser instantanément les nouveaux paquets des dépôts (ex: Copr).
 - `clean packages` : Supprime les paquets `.rpm` mis en cache pour libérer de l'espace disque. *(Nécessite sudo)*
+
+### Options de Portée (Scope)
+
+- `--system` : Cible explicitement l'environnement système (`/opt/applications`, `/var/lib/abpm`, dépôts système). Requiert les privilèges administrateur (root / sudo).
+- `--user` : Cible explicitement l'environnement utilisateur local (`~/Applications`, `~/.local/share/abpm`, Flatpak utilisateur).
 
 ### Options Générales
 

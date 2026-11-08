@@ -184,12 +184,29 @@ abpm install -y --progress --tar application.tar.gz
 
 ### 3. Uninstallation
 
-#### `abpm remove <PACKAGE...>`
+#### `abpm remove [OPTIONS] <PACKAGE...>`
 Uninstalls one or more applications regardless of their source format. `abpm` automatically detects whether the target is an Archive application, AppImage, Flatpak, or DNF package.
+
+Returns exit code `0` on complete success, and non-zero exit code `1` if any target is not found, requires administrative privileges, or encounters a deletion failure.
+
 ```bash
 # Remove multiple packages across different formats simultaneously
 abpm remove arduino-ide antigravity-ide vlc htop
+
+# Remove with real-time progress streaming for Blue Hub
+abpm remove --progress antigravity-ide
+
+# Explicitly target system-level packages (/opt, /var/lib/abpm, root required)
+sudo abpm remove --system my-system-tool
+
+# Explicitly target user-level packages (~/Applications, ~/.local/share/abpm)
+abpm remove --user my-local-tool
 ```
+
+#### Scope Flags (`--system` and `--user`)
+- `--system`: Restricts operations (listing, installation, uninstallation) strictly to system scopes (`/opt/applications/`, `/var/lib/abpm/`, `/usr/share/applications/`). Root privileges (`sudo` / `pkexec`) are required.
+- `--user`: Restricts operations strictly to local user scope (`~/Applications/`, `~/.local/share/abpm/`, `~/.local/share/applications/`). No root privileges required.
+- Default (`auto`): Checks user scope first; if not found, checks system scope (and prompts for root privileges if targeted).
 
 ---
 
@@ -298,13 +315,22 @@ abpm list --json
 ```json
 [
   {
+    "id": "antigravity",
+    "name": "antigravity",
+    "version": "standalone",
+    "source": "archive",
+    "icon": "/opt/applications/.icons/antigravity.png",
+    "package": "antigravity",
+    "is_system": true
+  },
+  {
     "id": "com.visualstudio.code",
     "name": "Visual Studio Code",
     "version": "1.139.1",
     "source": "flatpak",
     "icon": "com.visualstudio.code",
     "package": "com.visualstudio.code",
-    "is_system": false
+    "is_system": true
   },
   {
     "id": "org.gnome.Settings",

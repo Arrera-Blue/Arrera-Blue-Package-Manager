@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.7");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.8");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -24,6 +24,13 @@ void CliParser::print_help() {
               << "  search [OPTIONS] <PKG>  Recherche un paquet disponible\n"
               << "  list [OPTIONS]          Liste les paquets installes\n"
               << "  set-icon <PKG> <IMAGE>  Modifie l'icone d'une application installee\n\n"
+              << "GESTION DES DEPOTS & CONFIGURATION:\n"
+              << "  repo list [--json]      Liste tous les depots RPM et Flatpak\n"
+              << "  repo enable <ID>        Active un depot logiciel\n"
+              << "  repo disable <ID>       Desactive un depot (refuse les depots proteges)\n"
+              << "  repo add <URL/FICHIER>  Ajoute un nouveau depot RPM\n"
+              << "  config get <CLE>        Affiche une configuration (ex: auto-update)\n"
+              << "  config set <CLE> <VAL>  Modifie une configuration (ex: auto-update true/false)\n\n"
               << "  clean [CIBLE]           Nettoie le cache (all, expire-cache, packages)\n"
               << "  discover [OPTIONS]      Decouvrir les applications populaires / tendances\n\n"
               << "OPTIONS DE LISTAGE:\n"
@@ -94,6 +101,10 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
         options.command = CommandType::CLEAN;
     } else if (first_arg == "discover") {
         options.command = CommandType::DISCOVER;
+    } else if (first_arg == "repo") {
+        options.command = CommandType::REPO;
+    } else if (first_arg == "config") {
+        options.command = CommandType::CONFIG;
     } else {
         Logger::error(std::string("Commande inconnue : '") + std::string(first_arg) + "'");
         options.command = CommandType::HELP;

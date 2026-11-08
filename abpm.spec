@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.7
+Version:        2026.1.8
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -57,6 +57,7 @@ les applications autonomes AppImage et les archives compressées (tar, zip via l
 # Création des répertoires de stockage système pour les AppImages et Archives
 mkdir -p %{buildroot}%{_localstatedir}/lib/abpm
 mkdir -p %{buildroot}/opt/applications/.icons
+mkdir -p %{buildroot}%{_sysconfdir}/abpm
 
 # Installation des wrappers de redirection optionnels pour dnf et flatpak
 mkdir -p %{buildroot}%{_sysconfdir}/profile.d
@@ -71,11 +72,17 @@ EOF
 %doc README.md documentation.md
 %{_bindir}/abpm
 %config(noreplace) %{_sysconfdir}/profile.d/abpm-aliases.sh
+%dir %{_sysconfdir}/abpm
 %dir %{_localstatedir}/lib/abpm
 %dir /opt/applications
 %dir /opt/applications/.icons
 
 %changelog
+* Sun Nov 08 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.8-1
+- Ajout du sous-systeme abpm repo (list, enable, disable, add) avec protection des depots critiques.
+- Ajout du sous-systeme abpm config (get, set) et synchronisation systemd abpm-auto-update.timer.
+- Creation du repertoire systeme /etc/abpm pour la configuration persistante.
+
 * Sat Nov 07 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.7-1
 - Correction du statut is_system dans abpm list --json (archives/AppImages dans /var/lib/abpm et Flatpak systeme).
 - Ajout des options de portee --system et --user dans le CLI (list, install, remove).

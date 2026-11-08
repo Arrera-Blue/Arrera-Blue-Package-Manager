@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(abpm
-    VERSION 2026.1.7
+    VERSION 2026.1.8
     DESCRIPTION "Arrera Blue Package Manager"
     LANGUAGES CXX
 )
@@ -39,6 +39,8 @@ add_executable(abpm
     src/list/list_backend.cpp
     src/core/progress_emitter.cpp
     src/core/categorizer.cpp
+    src/repo/repo_backend.cpp
+    src/config/config_backend.cpp
 )
 
 # Dossier des en-têtes (#include <abpm/...>)

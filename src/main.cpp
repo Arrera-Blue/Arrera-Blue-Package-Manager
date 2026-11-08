@@ -8,6 +8,8 @@
 #include "abpm/archive/archive_backend.hpp"
 #include "abpm/discover/discover_backend.hpp"
 #include "abpm/list/list_backend.hpp"
+#include "abpm/repo/repo_backend.hpp"
+#include "abpm/config/config_backend.hpp"
 #include <iomanip>
 #include <iostream>
 #include <sstream> 
@@ -25,6 +27,8 @@ using abpm::appimage::AppImageBackend;
 using abpm::archive::ArchiveBackend;
 using abpm::discover::DiscoverBackend;
 using abpm::list::ListBackend;
+using abpm::repo::RepoBackend;
+using abpm::config::ConfigBackend;
 using abpm::core::Categorizer;
 
 int main(int argc, char* argv[]) {
@@ -749,6 +753,79 @@ int main(int argc, char* argv[]) {
             }
             DnfBackend::clean(target);
             break;
+        }
+
+        case CommandType::REPO: {
+            if (options.arguments.empty()) {
+                Logger::error("Sous-commande repo manquante : 'list', 'enable', 'disable', ou 'add'.");
+                return 1;
+            }
+
+            const auto& subcmd = options.arguments[0];
+
+            if (subcmd == "list") {
+                auto repos = RepoBackend::list_repos();
+                if (options.json_output) {
+                    std::cout << RepoBackend::to_json(repos);
+                } else {
+                    Logger::banner();
+                    RepoBackend::print_terminal_repos(repos);
+                }
+                break;
+            } else if (subcmd == "enable") {
+                if (options.arguments.size() < 2) {
+                    Logger::error("Utilisation : abpm repo enable <id_depot>");
+                    return 1;
+                }
+                if (!RepoBackend::enable_repo(options.arguments[1])) return 1;
+                break;
+            } else if (subcmd == "disable") {
+                if (options.arguments.size() < 2) {
+                    Logger::error("Utilisation : abpm repo disable <id_depot>");
+                    return 1;
+                }
+                if (!RepoBackend::disable_repo(options.arguments[1])) return 1;
+                break;
+            } else if (subcmd == "add") {
+                if (options.arguments.size() < 2) {
+                    Logger::error("Utilisation : abpm repo add <url_ou_fichier>");
+                    return 1;
+                }
+                if (!RepoBackend::add_repo(options.arguments[1])) return 1;
+                break;
+            } else {
+                Logger::error("Sous-commande repo inconnue : '" + subcmd + "'. Utilisez list, enable, disable ou add.");
+                return 1;
+            }
+        }
+
+        case CommandType::CONFIG: {
+            if (options.arguments.empty()) {
+                Logger::error("Sous-commande config manquante : 'get' ou 'set'.");
+                return 1;
+            }
+
+            const auto& subcmd = options.arguments[0];
+
+            if (subcmd == "get") {
+                if (options.arguments.size() < 2) {
+                    Logger::error("Utilisation : abpm config get <cle>");
+                    return 1;
+                }
+                std::string val = ConfigBackend::get(options.arguments[1]);
+                std::cout << val << "\n";
+                break;
+            } else if (subcmd == "set") {
+                if (options.arguments.size() < 3) {
+                    Logger::error("Utilisation : abpm config set <cle> <valeur>");
+                    return 1;
+                }
+                if (!ConfigBackend::set(options.arguments[1], options.arguments[2])) return 1;
+                break;
+            } else {
+                Logger::error("Sous-commande config inconnue : '" + subcmd + "'. Utilisez get ou set.");
+                return 1;
+            }
         }
 
         default:

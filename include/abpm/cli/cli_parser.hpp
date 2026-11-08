@@ -17,22 +17,24 @@ enum class CommandType {
     SET_ICON,
     DISCOVER,
     VERSION,
-    CLEAN
+    CLEAN,
+    REPO,    // <-- NOUVEAU : abpm repo (list, enable, disable, add)
+    CONFIG   // <-- NOUVEAU : abpm config (get, set)
 };
 
 enum class SourceFilter {
-    ALL,        // Par défaut (DNF + Flatpak)
-    DNF,        // --dnf
-    FLATPAK,    // --flatpak
-    RPM,        // --rpm (fichier local)
-    APPIMAGE,   // --appimage
-    TAR         // --tar (archive tar.xz)
+    ALL,
+    DNF,
+    FLATPAK,
+    RPM,
+    APPIMAGE,
+    TAR
 };
 
 enum class ScopeFilter {
-    AUTO,    
-    SYSTEM,  
-    USER     
+    AUTO,
+    SYSTEM,
+    USER
 };
 
 struct CliOptions {
@@ -40,27 +42,21 @@ struct CliOptions {
     SourceFilter filter = SourceFilter::ALL;
     ScopeFilter scope = ScopeFilter::AUTO;
     std::vector<std::string> arguments;
-    std::string custom_icon;  // Option --icon <FICHIER>
-    bool assumeyes = false;   // Option -y / --yes
+    std::string custom_icon;
+    bool assumeyes = false;
 
-    // Options spécifiques à discover et aux sorties structurées
-    int discover_page = 1;     // Option --page <N>
-    int discover_per_page = 6; // Option --per-page <N>
-    bool json_output = false;  // Option --json
-    bool list_apps_only = false; // Option --apps
+    int discover_page = 1;
+    int discover_per_page = 6;
+    bool json_output = false;
+    bool list_apps_only = false;
     std::string clean_target = "all";
-    bool progress = false;       
+    bool progress = false;
 };
 
 class CliParser {
 public:
-    // Parse argc et argv
     static CliOptions parse(int argc, char* argv[]);
-
-    // Affiche l'aide complète conforme au README
     static void print_help();
-
-    // Affiche la version
     static void print_version();
 };
 

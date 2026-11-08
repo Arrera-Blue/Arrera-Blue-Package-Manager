@@ -386,7 +386,17 @@ abpm repo list --json
     "type": "rpm",
     "enabled": true,
     "is_protected": true,
+    "is_testing": false,
     "url": "https://mirrors.fedoraproject.org/metalink?repo=fedora-44&arch=x86_64"
+  },
+  {
+    "id": "updates-testing",
+    "name": "Fedora 44 - x86_64 - Test Updates",
+    "type": "rpm",
+    "enabled": false,
+    "is_protected": false,
+    "is_testing": true,
+    "url": "https://mirrors.fedoraproject.org/metalink?repo=updates-testing-f44&arch=x86_64"
   },
   {
     "id": "flathub",
@@ -394,10 +404,14 @@ abpm repo list --json
     "type": "flatpak",
     "enabled": true,
     "is_protected": true,
+    "is_testing": false,
     "url": "https://dl.flathub.org/repo/"
   }
 ]
 ```
+
+- **`is_protected`**: Set to `true` for critical OS repositories (`fedora`, `updates`, `fedora-updates`, `copr-arrera-blue`, `flathub`) that cannot be disabled.
+- **`is_testing`**: Automatically set to `true` if the repository ID or display name contains keywords such as `testing`, `test`, or `caution` (e.g. `updates-testing`, `rpmsphere-caution`). Used by Blue Hub to place experimental repositories in a separated section with safety warnings.
 
 #### `abpm repo enable <REPO_ID>`
 Enables a disabled repository. Automatically detects whether the repository is RPM or Flatpak. Requires administrator (`sudo`) privileges.

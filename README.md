@@ -69,8 +69,8 @@
 
 ### Dépôts Logiciels (Repo)
 
-- `repo list` : Liste tous les dépôts logiciels configurés (DNF/RPM et remotes Flatpak) avec leur état (activé/désactivé) et statut de protection.
-- `repo list --json` : Sortie brute en JSON standardisé pour les Préférences de **Blue Hub** (champs `id`, `name`, `type`, `enabled`, `is_protected`, `url`).
+- `repo list` : Liste tous les dépôts logiciels configurés (DNF/RPM et remotes Flatpak) avec leur état (activé/désactivé), statut de protection et badge de test/instabilité (`[Test/Instable]`).
+- `repo list --json` : Sortie brute en JSON standardisé pour les Préférences de **Blue Hub** (champs `id`, `name`, `type`, `enabled`, `is_protected`, `is_testing`, `url`).
 - `repo enable [ID]` : Active un dépôt logiciel RPM ou remote Flatpak désactivé. *(Nécessite sudo)*
 - `repo disable [ID]` : Désactive un dépôt logiciel. Refuse strictement l'opération si le dépôt est indispensable au système Arrera Blue (`is_protected: true`). *(Nécessite sudo)*
 - `repo add [URL_OU_FICHIER]` : Ajoute un nouveau dépôt RPM au système depuis un fichier `.repo` ou une URL. *(Nécessite sudo)*

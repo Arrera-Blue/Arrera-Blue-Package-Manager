@@ -18,6 +18,8 @@ It seamlessly consolidates system packages (**DNF/RPM** via `libdnf5`), sandboxe
    - [discover](#5-discover-trending-applications)
    - [list](#6-listing-installed-packages)
    - [set-icon](#7-icon-management)
+   - [repo](#8-repository-management)
+   - [config](#9-configuration--automatic-updates)
 4. [Standalone Application Storage & Integration](#standalone-application-storage--integration)
    - [User Mode vs. System (Root) Mode](#user-mode-vs-system-mode)
    - [AppImage Integration](#appimage-integration)
@@ -357,6 +359,85 @@ abpm icon antigravity-ide /home/user/Pictures/custom-code.png
 
 # For system-wide installations (installed in /opt/applications):
 sudo abpm set-icon arduino-ide /usr/share/pixmaps/new-icon.png
+```
+
+---
+
+### 8. Repository Management (`abpm repo`)
+
+Provides unified discovery and control of RPM repositories (via DNF5) and Flatpak remotes (via `libflatpak`), designed for the **Blue Hub** preferences GUI.
+
+#### `abpm repo list [--json]`
+Lists all configured repositories. With `--json`, outputs raw, unadorned JSON for UI consumption.
+```bash
+# Terminal view
+abpm repo list
+
+# JSON schema for Blue Hub
+abpm repo list --json
+```
+
+##### Repo JSON Schema
+```json
+[
+  {
+    "id": "fedora",
+    "name": "Fedora 44 - x86_64",
+    "type": "rpm",
+    "enabled": true,
+    "is_protected": true,
+    "url": "https://mirrors.fedoraproject.org/metalink?repo=fedora-44&arch=x86_64"
+  },
+  {
+    "id": "flathub",
+    "name": "Flathub",
+    "type": "flatpak",
+    "enabled": true,
+    "is_protected": true,
+    "url": "https://dl.flathub.org/repo/"
+  }
+]
+```
+
+#### `abpm repo enable <REPO_ID>`
+Enables a disabled repository. Automatically detects whether the repository is RPM or Flatpak. Requires administrator (`sudo`) privileges.
+```bash
+sudo abpm repo enable rpmfusion-free
+sudo abpm repo enable fedora-testing
+```
+
+#### `abpm repo disable <REPO_ID>`
+Disables a non-essential repository. Protects core system repositories (`fedora`, `updates`, `copr-arrera-blue`, `flathub`), returning exit code `1` and blocking disablement if attempted. Requires administrator (`sudo`) privileges.
+```bash
+sudo abpm repo disable rpmfusion-free
+```
+
+#### `abpm repo add <URL_OR_FILE>`
+Adds a new RPM repository file (.repo) from a local path or remote URL. Requires administrator (`sudo`) privileges.
+```bash
+sudo abpm repo add https://example.com/repo/custom.repo
+```
+
+---
+
+### 9. Configuration & Automatic Updates (`abpm config`)
+
+Manages ABPM system settings stored in `/etc/abpm/abpm.conf` (root) or `~/.config/abpm/abpm.conf` (user).
+
+#### `abpm config get <KEY>`
+Reads a configuration value. If `auto-update` is queried and not explicitly defined, it defaults to `true`.
+```bash
+abpm config get auto-update
+```
+
+#### `abpm config set <KEY> <VALUE>`
+Sets a configuration key. When setting `auto-update` to `true` or `false`, ABPM automatically enables or disables the systemd timer `abpm-auto-update.timer`.
+```bash
+# Disable automatic background updates
+sudo abpm config set auto-update false
+
+# Re-enable automatic background updates
+sudo abpm config set auto-update true
 ```
 
 ---

@@ -67,6 +67,19 @@
 - `clean expire-cache` : Force l'expiration immédiate du cache local pour actualiser instantanément les nouveaux paquets des dépôts (ex: Copr).
 - `clean packages` : Supprime les paquets `.rpm` mis en cache pour libérer de l'espace disque. *(Nécessite sudo)*
 
+### Dépôts Logiciels (Repo)
+
+- `repo list` : Liste tous les dépôts logiciels configurés (DNF/RPM et remotes Flatpak) avec leur état (activé/désactivé) et statut de protection.
+- `repo list --json` : Sortie brute en JSON standardisé pour les Préférences de **Blue Hub** (champs `id`, `name`, `type`, `enabled`, `is_protected`, `url`).
+- `repo enable [ID]` : Active un dépôt logiciel RPM ou remote Flatpak désactivé. *(Nécessite sudo)*
+- `repo disable [ID]` : Désactive un dépôt logiciel. Refuse strictement l'opération si le dépôt est indispensable au système Arrera Blue (`is_protected: true`). *(Nécessite sudo)*
+- `repo add [URL_OU_FICHIER]` : Ajoute un nouveau dépôt RPM au système depuis un fichier `.repo` ou une URL. *(Nécessite sudo)*
+
+### Configuration & Mises à Jour Automatiques (Config)
+
+- `config get [CLE]` : Affiche la valeur courante d'une clé de configuration (ex: `config get auto-update`).
+- `config set [CLE] [VALEUR]` : Modifie une option de configuration (ex: `config set auto-update false`). Pour `auto-update`, synchronise automatiquement le timer systemd `abpm-auto-update.timer` (`enable --now` ou `disable --now`).
+
 ### Options de Portée (Scope)
 
 - `--system` : Cible explicitement l'environnement système (`/opt/applications`, `/var/lib/abpm`, dépôts système). Requiert les privilèges administrateur (root / sudo).

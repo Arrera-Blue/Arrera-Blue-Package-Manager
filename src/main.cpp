@@ -11,12 +11,14 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream> 
+#include <unistd.h>
 
 using abpm::core::Logger;
 using abpm::core::ProgressEmitter;
 using abpm::cli::CliParser;
 using abpm::cli::CommandType;
 using abpm::cli::SourceFilter;
+using abpm::cli::ScopeFilter;
 using abpm::flatpak::FlatpakBackend;
 using abpm::dnf::DnfBackend;
 using abpm::appimage::AppImageBackend;
@@ -45,7 +47,7 @@ int main(int argc, char* argv[]) {
 
             // 1. Sortie JSON brute pour Blue Hub (aucune bannière, aucun texte superflu)
             if (options.json_output) {
-                auto apps = ListBackend::get_installed_apps(options.filter);
+                auto apps = ListBackend::get_installed_apps(options.filter, options.scope);
                 std::cout << ListBackend::to_json(apps);
                 break;
             }
@@ -55,7 +57,7 @@ int main(int argc, char* argv[]) {
             // 2. Mode --apps dans le terminal : affichage épuré des applications uniquement
             if (apps_mode) {
                 Logger::info("Récupération des applications installées...");
-                auto apps = ListBackend::get_installed_apps(options.filter);
+                auto apps = ListBackend::get_installed_apps(options.filter, options.scope);
                 ListBackend::print_terminal_apps(apps);
                 break;
             }
@@ -408,7 +410,7 @@ int main(int argc, char* argv[]) {
                 if (!ProgressEmitter::is_enabled()) {
                     Logger::info("Installation du fichier AppImage : " + pkg_name);
                 }
-                if (!AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon)) {
+                if (!AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon, options.scope)) {
                     return 1;
                 }
                 handled = true;
@@ -418,7 +420,7 @@ int main(int argc, char* argv[]) {
                 if (!ProgressEmitter::is_enabled()) {
                     Logger::info("Installation du fichier d'archive : " + pkg_name);
                 }
-                if (!ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon)) {
+                if (!ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon, options.scope)) {
                     return 1;
                 }
                 handled = true;
@@ -483,110 +485,189 @@ int main(int argc, char* argv[]) {
         }
 
         case CommandType::REMOVE: {
+            if (options.progress) {
+                ProgressEmitter::set_enabled(true);
+            }
+
             if (options.arguments.empty()) {
-                Logger::error("Spécifiez au moins un paquet à désinstaller (ex: abpm remove vlc gimp)");
+                std::string msg = "Spécifiez au moins un paquet à désinstaller (ex: abpm remove vlc gimp)";
+                ProgressEmitter::emit_error(msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::error(msg);
+                }
                 return 1;
             }
-            Logger::banner();
-            Logger::info("Analyse des paquets à désinstaller...");
+
+            if (options.scope == ScopeFilter::SYSTEM && geteuid() != 0) {
+                std::string msg = "L'option --system requiert les privilèges administrateur (sudo / pkexec).";
+                ProgressEmitter::emit_error(msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::warning(msg);
+                    Logger::info("Relancez avec sudo : 'sudo abpm remove --system ...'");
+                }
+                return 1;
+            }
+
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::banner();
+                Logger::info("Analyse des paquets à désinstaller...");
+            }
+
             std::vector<std::string> archive_to_remove;
             std::vector<std::string> appimage_to_remove;
             std::vector<std::string> dnf_to_remove;
             std::vector<std::string> flatpak_to_remove;
             std::vector<std::string> not_found;
+
+            bool has_error = false;
+
             for (const auto& pkg : options.arguments) {
                 // 1. Vérifier si c'est une application archive (tar / zip)
-                if (ArchiveBackend::is_installed(pkg)) {
+                if (ArchiveBackend::is_installed(pkg, options.scope)) {
+                    if (ArchiveBackend::is_system(pkg) && geteuid() != 0) {
+                        std::string msg = "L'application '" + pkg + "' est installée au niveau système. Privilèges root requis.";
+                        ProgressEmitter::emit_error(msg);
+                        if (!ProgressEmitter::is_enabled()) {
+                            Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
+                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
+                        }
+                        has_error = true;
+                        continue;
+                    }
                     archive_to_remove.push_back(pkg);
                     continue;
                 }
+
                 // 2. Vérifier si c'est une application AppImage
-                if (AppImageBackend::is_installed(pkg)) {
+                if (AppImageBackend::is_installed(pkg, options.scope)) {
+                    if (AppImageBackend::is_system(pkg) && geteuid() != 0) {
+                        std::string msg = "L'application '" + pkg + "' est installée au niveau système. Privilèges root requis.";
+                        ProgressEmitter::emit_error(msg);
+                        if (!ProgressEmitter::is_enabled()) {
+                            Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
+                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
+                        }
+                        has_error = true;
+                        continue;
+                    }
                     appimage_to_remove.push_back(pkg);
                     continue;
                 }
+
                 // 3. Vérifier si c'est une application Flatpak
-                std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg);
+                std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg, options.scope);
                 if (!flatpak_ref.empty()) {
                     flatpak_to_remove.push_back(flatpak_ref);
                     continue;
                 }
-                // 4. Vérifier si c'est un paquet DNF
-                if (DnfBackend::is_installed(pkg)) {
+
+                // 4. Vérifier si c'est un paquet DNF (exclu si scope == USER)
+                if (options.scope != ScopeFilter::USER && DnfBackend::is_installed(pkg)) {
+                    if (geteuid() != 0) {
+                        std::string msg = "Le paquet '" + pkg + "' est un composant système DNF. Privilèges root requis.";
+                        ProgressEmitter::emit_error(msg);
+                        if (!ProgressEmitter::is_enabled()) {
+                            Logger::warning("Le paquet '" + pkg + "' est installé au niveau système DNF.");
+                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
+                        }
+                        has_error = true;
+                        continue;
+                    }
                     dnf_to_remove.push_back(pkg);
                     continue;
                 }
+
                 // 5. Introuvable
                 not_found.push_back(pkg);
             }
+
             for (const auto& missing : not_found) {
-                Logger::warning("Le paquet ou l'application '" + missing + "' n'est pas installé sur le système.");
+                std::string msg = "Le paquet ou l'application '" + missing + "' n'est actuellement pas installé.";
+                ProgressEmitter::emit_error(msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::warning(msg);
+                }
+                has_error = true;
             }
+
             size_t total_found = archive_to_remove.size() + appimage_to_remove.size() + dnf_to_remove.size() + flatpak_to_remove.size();
             if (total_found == 0) {
-                Logger::error("Aucun des paquets spécifiés n'est actuellement installé.");
-                break;
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::error("Aucun des paquets spécifiés n'est actuellement installé ou accessible avec les privilèges actuels.");
+                }
+                return 1;
             }
+
             // Récapitulatif
-            if (!archive_to_remove.empty()) {
-                std::cout << "\n--- Applications Archives (Tar / Zip) à désinstaller (" << archive_to_remove.size() << ") ---\n";
-                for (const auto& app : archive_to_remove) {
-                    std::cout << " • " << app << "\n";
+            if (!ProgressEmitter::is_enabled()) {
+                if (!archive_to_remove.empty()) {
+                    std::cout << "\n--- Applications Archives (Tar / Zip) à désinstaller (" << archive_to_remove.size() << ") ---\n";
+                    for (const auto& app : archive_to_remove) {
+                        std::cout << " • " << app << "\n";
+                    }
                 }
-            }
-            if (!appimage_to_remove.empty()) {
-                std::cout << "\n--- Applications AppImage à désinstaller (" << appimage_to_remove.size() << ") ---\n";
-                for (const auto& app : appimage_to_remove) {
-                    std::cout << " • " << app << "\n";
+                if (!appimage_to_remove.empty()) {
+                    std::cout << "\n--- Applications AppImage à désinstaller (" << appimage_to_remove.size() << ") ---\n";
+                    for (const auto& app : appimage_to_remove) {
+                        std::cout << " • " << app << "\n";
+                    }
                 }
-            }
-            if (!dnf_to_remove.empty()) {
-                std::cout << "\n--- Paquets DNF à désinstaller (" << dnf_to_remove.size() << ") ---\n";
-                for (const auto& p : dnf_to_remove) {
-                    std::cout << " • " << p << "\n";
+                if (!dnf_to_remove.empty()) {
+                    std::cout << "\n--- Paquets DNF à désinstaller (" << dnf_to_remove.size() << ") ---\n";
+                    for (const auto& p : dnf_to_remove) {
+                        std::cout << " • " << p << "\n";
+                    }
                 }
-            }
-            if (!flatpak_to_remove.empty()) {
-                std::cout << "\n--- Applications Flatpak à désinstaller (" << flatpak_to_remove.size() << ") ---\n";
-                for (const auto& ref : flatpak_to_remove) {
-                    std::cout << " • " << ref << "\n";
+                if (!flatpak_to_remove.empty()) {
+                    std::cout << "\n--- Applications Flatpak à désinstaller (" << flatpak_to_remove.size() << ") ---\n";
+                    for (const auto& ref : flatpak_to_remove) {
+                        std::cout << " • " << ref << "\n";
+                    }
                 }
+                std::cout << "\n";
             }
-            std::cout << "\n";
+
             // Demande de confirmation
             if (!options.assumeyes) {
                 if (!Logger::confirm("Voulez-vous procéder à la désinstallation ?")) {
                     Logger::info("Désinstallation annulée.");
-                    break;
+                    return 0;
                 }
             }
+
             // Exécution
             bool archive_ok = true;
             bool appimage_ok = true;
             bool dnf_ok = true;
             bool flatpak_ok = true;
+
             if (!archive_to_remove.empty()) {
-                archive_ok = ArchiveBackend::remove(archive_to_remove);
+                archive_ok = ArchiveBackend::remove(archive_to_remove, options.scope);
             }
             if (!appimage_to_remove.empty()) {
-                appimage_ok = AppImageBackend::remove(appimage_to_remove);
+                appimage_ok = AppImageBackend::remove(appimage_to_remove, options.scope);
             }
             if (!dnf_to_remove.empty()) {
                 dnf_ok = DnfBackend::remove(dnf_to_remove);
-                if (dnf_ok) {
+                if (dnf_ok && !ProgressEmitter::is_enabled()) {
                     Logger::success("Paquets DNF désinstallés avec succès !");
                 }
             }
             if (!flatpak_to_remove.empty()) {
                 flatpak_ok = FlatpakBackend::remove(flatpak_to_remove);
-                if (flatpak_ok) {
+                if (flatpak_ok && !ProgressEmitter::is_enabled()) {
                     Logger::success("Applications Flatpak désinstallées avec succès !");
                 }
             }
-            if (dnf_ok && flatpak_ok && appimage_ok && archive_ok) {
+
+            if (has_error || !archive_ok || !appimage_ok || !dnf_ok || !flatpak_ok) {
+                return 1;
+            }
+
+            if (!ProgressEmitter::is_enabled()) {
                 Logger::success("Toutes les désinstallations ont été effectuées avec succès !");
             }
-            break;
+            return 0;
         }
 
         case CommandType::SET_ICON: {

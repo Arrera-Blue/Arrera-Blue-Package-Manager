@@ -9,7 +9,7 @@ namespace abpm::list {
 
 class ListBackend {
 public:
-    static std::vector<core::InstalledApp> get_installed_apps(cli::SourceFilter filter = cli::SourceFilter::ALL);
+    static std::vector<core::InstalledApp> get_installed_apps(cli::SourceFilter filter = cli::SourceFilter::ALL, cli::ScopeFilter scope = cli::ScopeFilter::AUTO);
 
     static std::string to_json(const std::vector<core::InstalledApp>& apps);
 

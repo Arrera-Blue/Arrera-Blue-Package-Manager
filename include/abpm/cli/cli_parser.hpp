@@ -29,9 +29,16 @@ enum class SourceFilter {
     TAR         // --tar (archive tar.xz)
 };
 
+enum class ScopeFilter {
+    AUTO,    
+    SYSTEM,  
+    USER     
+};
+
 struct CliOptions {
     CommandType command = CommandType::NONE;
     SourceFilter filter = SourceFilter::ALL;
+    ScopeFilter scope = ScopeFilter::AUTO;
     std::vector<std::string> arguments;
     std::string custom_icon;  // Option --icon <FICHIER>
     bool assumeyes = false;   // Option -y / --yes

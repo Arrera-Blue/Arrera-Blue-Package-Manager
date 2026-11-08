@@ -433,11 +433,14 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
     return true;
 }
 
-std::string FlatpakBackend::find_installed_ref(std::string_view name_or_id) {
+std::string FlatpakBackend::find_installed_ref(std::string_view name_or_id, cli::ScopeFilter scope) {
     auto installed = list_installed();
     std::string needle = to_lower(name_or_id);
 
     for (const auto& app : installed) {
+        if (scope == cli::ScopeFilter::USER && app.origin != "user") continue;
+        if (scope == cli::ScopeFilter::SYSTEM && app.origin != "system") continue;
+
         if (to_lower(app.id) == needle || to_lower(app.name) == needle ||
             to_lower(app.id).ends_with("." + needle)) {
             const char* arch = app.arch.empty() ? flatpak_get_default_arch() : app.arch.c_str();
@@ -447,49 +450,89 @@ std::string FlatpakBackend::find_installed_ref(std::string_view name_or_id) {
     return "";
 }
 
-bool FlatpakBackend::remove(const std::vector<std::string>& formatted_refs) {
-    if (formatted_refs.empty()) return true;
+bool FlatpakBackend::is_system_ref(std::string_view name_or_id) {
+    auto installed = list_installed();
+    std::string needle = to_lower(name_or_id);
 
-    g_autoptr(GError) err = nullptr;
-    g_autoptr(FlatpakInstallation) inst = flatpak_installation_new_system(nullptr, &err);
-    if (!inst) {
-        Logger::error("Impossible d'accéder au système Flatpak.");
-        return false;
-    }
-
-    g_autoptr(GError) tx_err = nullptr;
-    g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
-    if (!tx) {
-        Logger::error("Impossible d'initialiser la transaction Flatpak.");
-        return false;
-    }
-
-    for (const auto& ref : formatted_refs) {
-        g_autoptr(GError) add_err = nullptr;
-        if (!flatpak_transaction_add_uninstall(tx, ref.c_str(), &add_err)) {
-            if (add_err) {
-                Logger::warning(std::string("Erreur préparation désinstallation : ") + add_err->message);
-            }
+    // Si trouvé en utilisateur, priorité user
+    for (const auto& app : installed) {
+        if (app.origin == "user" &&
+            (to_lower(app.id) == needle || to_lower(app.name) == needle || to_lower(app.id).ends_with("." + needle))) {
+            return false;
         }
     }
 
-    if (flatpak_transaction_is_empty(tx)) {
-        return false;
+    // Sinon si trouvé en système
+    for (const auto& app : installed) {
+        if (app.origin == "system" &&
+            (to_lower(app.id) == needle || to_lower(app.name) == needle || to_lower(app.id).ends_with("." + needle))) {
+            return true;
+        }
     }
 
-    g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
-        const char* r = flatpak_transaction_operation_get_ref(op);
-        Logger::info(std::string("Désinstallation en cours : ") + (r ? r : ""));
-    }), nullptr);
+    return false;
+}
 
-    Logger::info("Suppression des applications Flatpak...");
-    g_autoptr(GError) run_err = nullptr;
-    if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
-        Logger::error(std::string("Échec de la désinstallation Flatpak : ") + (run_err ? run_err->message : ""));
-        return false;
+bool FlatpakBackend::remove(const std::vector<std::string>& formatted_refs) {
+    if (formatted_refs.empty()) return true;
+
+    bool any_success = false;
+
+    auto try_remove_from_inst = [&](FlatpakInstallation* inst, const std::string& label) -> bool {
+        if (!inst) return false;
+        g_autoptr(GError) tx_err = nullptr;
+        g_autoptr(FlatpakTransaction) tx = flatpak_transaction_new_for_installation(inst, nullptr, &tx_err);
+        if (!tx) return false;
+
+        bool added_any = false;
+        for (const auto& ref : formatted_refs) {
+            g_autoptr(GError) add_err = nullptr;
+            if (flatpak_transaction_add_uninstall(tx, ref.c_str(), &add_err)) {
+                added_any = true;
+            }
+        }
+
+        if (!added_any || flatpak_transaction_is_empty(tx)) {
+            return false;
+        }
+
+        g_signal_connect(tx, "new-operation", G_CALLBACK(+[](FlatpakTransaction*, FlatpakTransactionOperation* op, FlatpakTransactionProgress*, gpointer) {
+            const char* r = flatpak_transaction_operation_get_ref(op);
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::info(std::string("Désinstallation en cours : ") + (r ? r : ""));
+            }
+        }), nullptr);
+
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Suppression des applications Flatpak (" + label + ")...");
+        }
+        g_autoptr(GError) run_err = nullptr;
+        if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
+            std::string msg = std::string("Échec de la désinstallation Flatpak (") + label + ") : " + (run_err ? run_err->message : "erreur");
+            ProgressEmitter::emit_error(msg);
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::error(msg);
+            }
+            return false;
+        }
+        return true;
+    };
+
+    // 1. Essayer d'abord l'espace utilisateur
+    g_autoptr(GError) err_user = nullptr;
+    g_autoptr(FlatpakInstallation) user_inst = flatpak_installation_new_user(nullptr, &err_user);
+    if (try_remove_from_inst(user_inst, "user")) {
+        any_success = true;
     }
 
-    return true;
+    // 2. Essayer l'espace système
+    g_autoptr(GError) err_sys = nullptr;
+    g_autoptr(FlatpakInstallation) sys_inst = flatpak_installation_new_system(nullptr, &err_sys);
+    if (try_remove_from_inst(sys_inst, "système")) {
+        any_success = true;
+    }
+
+    return any_success;
 }
 
 } // namespace abpm::flatpak

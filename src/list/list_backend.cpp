@@ -22,6 +22,7 @@ namespace abpm::list {
 namespace fs = std::filesystem;
 using core::InstalledApp;
 using cli::SourceFilter;
+using cli::ScopeFilter;
 
 namespace {
 
@@ -125,9 +126,8 @@ std::vector<InstalledApp> collect_dnf_apps() {
                 item.icon = app_icon.empty() ? pkg_name : app_icon;
                 item.package = pkg_name;
 
-                // Vérification du statut système protégé
-                item.is_system = (SYSTEM_PROTECTED_PACKAGES.find(pkg_name) != SYSTEM_PROTECTED_PACKAGES.end()) ||
-                                 (stem == "org.gnome.Settings" || stem == "org.gnome.Nautilus" || stem == "org.gnome.Ptyxis");
+                // Tous les paquets système gérés par libdnf5 sont des composants système :
+                item.is_system = true;
 
                 apps.push_back(std::move(item));
             }
@@ -146,6 +146,8 @@ void collect_flatpak_from_installation(FlatpakInstallation* inst, std::vector<In
         inst, FLATPAK_REF_KIND_APP, nullptr, &err);
     if (!refs) return;
 
+    gboolean is_user = flatpak_installation_get_is_user(inst);
+
     for (guint i = 0; i < refs->len; ++i) {
         auto* ref = FLATPAK_INSTALLED_REF(g_ptr_array_index(refs, i));
         const char* raw_id = flatpak_ref_get_name(FLATPAK_REF(ref));
@@ -161,7 +163,7 @@ void collect_flatpak_from_installation(FlatpakInstallation* inst, std::vector<In
         item.source = "flatpak";
         item.icon = raw_id;
         item.package = raw_id;
-        item.is_system = false;
+        item.is_system = !is_user;
 
         out_apps.push_back(std::move(item));
     }
@@ -186,6 +188,8 @@ struct ManifestAppEntry {
     std::string name;
     std::string desktop_path;
     std::string version;
+    std::string icon_path;
+    bool is_system{false};
 };
 
 std::vector<ManifestAppEntry> read_manifest(const fs::path& manifest_path) {
@@ -224,6 +228,11 @@ std::vector<ManifestAppEntry> read_manifest(const fs::path& manifest_path) {
             if (line.find("\"name\"") != std::string::npos) current.name = extract_val("name");
             else if (line.find("\"desktop_path\"") != std::string::npos) current.desktop_path = extract_val("desktop_path");
             else if (line.find("\"version\"") != std::string::npos) current.version = extract_val("version");
+            else if (line.find("\"icon_path\"") != std::string::npos) current.icon_path = extract_val("icon_path");
+            else if (line.find("\"is_system\"") != std::string::npos) {
+                if (line.find("true") != std::string::npos) current.is_system = true;
+                else if (line.find("false") != std::string::npos) current.is_system = false;
+            }
         }
     }
     return entries;
@@ -257,6 +266,7 @@ std::vector<InstalledApp> collect_appimage_apps() {
     };
 
     for (const auto& p : paths) {
+        bool is_sys = (p == "/var/lib/abpm/appimages.json");
         auto entries = read_manifest(p);
         for (const auto& e : entries) {
             InstalledApp item;
@@ -264,9 +274,11 @@ std::vector<InstalledApp> collect_appimage_apps() {
             item.name = e.name;
             item.version = e.version.empty() ? "standalone" : e.version;
             item.source = "appimage";
-            item.icon = extract_icon_from_desktop(e.desktop_path, e.name);
+            item.icon = (!e.icon_path.empty() && fs::exists(e.icon_path))
+                        ? e.icon_path
+                        : extract_icon_from_desktop(e.desktop_path, e.name);
             item.package = e.name;
-            item.is_system = false;
+            item.is_system = is_sys;
             apps.push_back(std::move(item));
         }
     }
@@ -285,6 +297,7 @@ std::vector<InstalledApp> collect_archive_apps() {
     };
 
     for (const auto& p : paths) {
+        bool is_sys = (p == "/var/lib/abpm/archives.json");
         auto entries = read_manifest(p);
         for (const auto& e : entries) {
             InstalledApp item;
@@ -292,9 +305,11 @@ std::vector<InstalledApp> collect_archive_apps() {
             item.name = e.name;
             item.version = e.version.empty() ? "standalone" : e.version;
             item.source = "archive";
-            item.icon = extract_icon_from_desktop(e.desktop_path, e.name);
+            item.icon = (!e.icon_path.empty() && fs::exists(e.icon_path))
+                        ? e.icon_path
+                        : extract_icon_from_desktop(e.desktop_path, e.name);
             item.package = e.name;
-            item.is_system = false;
+            item.is_system = is_sys;
             apps.push_back(std::move(item));
         }
     }
@@ -303,7 +318,7 @@ std::vector<InstalledApp> collect_archive_apps() {
 
 } // anonymous namespace
 
-std::vector<InstalledApp> ListBackend::get_installed_apps(SourceFilter filter) {
+std::vector<InstalledApp> ListBackend::get_installed_apps(SourceFilter filter, ScopeFilter scope) {
     std::vector<InstalledApp> all_apps;
 
     if (filter == SourceFilter::ALL || filter == SourceFilter::FLATPAK) {
@@ -324,6 +339,12 @@ std::vector<InstalledApp> ListBackend::get_installed_apps(SourceFilter filter) {
     if (filter == SourceFilter::ALL || filter == SourceFilter::DNF) {
         auto dnfs = collect_dnf_apps();
         all_apps.insert(all_apps.end(), dnfs.begin(), dnfs.end());
+    }
+
+    if (scope == ScopeFilter::SYSTEM) {
+        std::erase_if(all_apps, [](const auto& app) { return !app.is_system; });
+    } else if (scope == ScopeFilter::USER) {
+        std::erase_if(all_apps, [](const auto& app) { return app.is_system; });
     }
 
     return all_apps;

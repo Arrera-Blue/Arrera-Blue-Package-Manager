@@ -19,6 +19,7 @@ struct PackageInfo {
     std::string arch;          // Architecture (ex: "x86_64")
     PackageSource source;      // DNF, FLATPAK, etc.
     std::string origin;        // "system", "user", etc.
+    bool is_system = false;
 };
 
 struct UpdateInfo {

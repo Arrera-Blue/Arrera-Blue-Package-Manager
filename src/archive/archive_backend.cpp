@@ -21,16 +21,6 @@ using core::ProgressEmitter;
 
 namespace {
 
-struct ArchiveRecord {
-    std::string name;
-    std::string install_dir;
-    std::string binary_path;
-    std::string symlink_path;
-    std::string desktop_path;
-    std::string version;
-    bool is_system{false};
-};
-
 struct ArchivePaths {
     fs::path apps_dir;
     fs::path icons_dir;
@@ -41,9 +31,15 @@ struct ArchivePaths {
     bool is_system{false};
 };
 
-ArchivePaths get_paths(bool force_system = false) {
+ArchivePaths get_paths(cli::ScopeFilter scope = cli::ScopeFilter::AUTO) {
     ArchivePaths p;
-    p.is_system = force_system || (geteuid() == 0);
+    if (scope == cli::ScopeFilter::SYSTEM) {
+        p.is_system = true;
+    } else if (scope == cli::ScopeFilter::USER) {
+        p.is_system = false;
+    } else {
+        p.is_system = (geteuid() == 0);
+    }
 
     if (p.is_system) {
         p.apps_dir = "/opt/applications";
@@ -63,6 +59,10 @@ ArchivePaths get_paths(bool force_system = false) {
         p.manifest_file = p.manifest_dir / "archives.json";
     }
     return p;
+}
+
+ArchivePaths get_paths(bool force_system) {
+    return get_paths(force_system ? cli::ScopeFilter::SYSTEM : cli::ScopeFilter::USER);
 }
 
 // Nettoie l'extension et extrait nom + version
@@ -411,6 +411,7 @@ std::vector<ArchiveRecord> load_manifest(const fs::path& manifest_path, bool is_
         if (line.find('{') != std::string::npos) {
             current = ArchiveRecord{};
             current.is_system = is_system;
+            current.scope = is_system ? "system" : "user";
             in_entry = true;
         } else if (line.find('}') != std::string::npos) {
             if (in_entry && !current.name.empty()) {
@@ -431,11 +432,19 @@ std::vector<ArchiveRecord> load_manifest(const fs::path& manifest_path, bool is_
             };
 
             if (line.find("\"name\"") != std::string::npos) current.name = extract_val("name");
+            else if (line.find("\"version\"") != std::string::npos) current.version = extract_val("version");
             else if (line.find("\"install_dir\"") != std::string::npos) current.install_dir = extract_val("install_dir");
             else if (line.find("\"binary_path\"") != std::string::npos) current.binary_path = extract_val("binary_path");
             else if (line.find("\"symlink_path\"") != std::string::npos) current.symlink_path = extract_val("symlink_path");
             else if (line.find("\"desktop_path\"") != std::string::npos) current.desktop_path = extract_val("desktop_path");
-            else if (line.find("\"version\"") != std::string::npos) current.version = extract_val("version");
+            else if (line.find("\"icon_path\"") != std::string::npos) current.icon_path = extract_val("icon_path");
+            else if (line.find("\"scope\"") != std::string::npos) {
+                current.scope = extract_val("scope");
+                current.is_system = (current.scope == "system");
+            } else if (line.find("\"is_system\"") != std::string::npos) {
+                if (line.find("true") != std::string::npos) current.is_system = true;
+                else if (line.find("false") != std::string::npos) current.is_system = false;
+            }
         }
     }
     return records;
@@ -451,11 +460,14 @@ void save_manifest(const fs::path& manifest_path, const std::vector<ArchiveRecor
         const auto& r = records[i];
         file << "  {\n";
         file << "    \"name\": \"" << r.name << "\",\n";
+        file << "    \"version\": \"" << r.version << "\",\n";
         file << "    \"install_dir\": \"" << r.install_dir << "\",\n";
         file << "    \"binary_path\": \"" << r.binary_path << "\",\n";
         file << "    \"symlink_path\": \"" << r.symlink_path << "\",\n";
         file << "    \"desktop_path\": \"" << r.desktop_path << "\",\n";
-        file << "    \"version\": \"" << r.version << "\"\n";
+        file << "    \"icon_path\": \"" << r.icon_path << "\",\n";
+        file << "    \"is_system\": " << (r.is_system ? "true" : "false") << ",\n";
+        file << "    \"scope\": \"" << (r.is_system ? "system" : "user") << "\"\n";
         file << "  }" << (i + 1 < records.size() ? "," : "") << "\n";
     }
     file << "]\n";
@@ -463,9 +475,18 @@ void save_manifest(const fs::path& manifest_path, const std::vector<ArchiveRecor
 
 } // anonymous namespace
 
-bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const std::string& custom_icon) {
+bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const std::string& custom_icon, cli::ScopeFilter scope) {
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
         std::string msg = "Fichier d'archive introuvable : '" + file_path + "'";
+        ProgressEmitter::emit_error(msg);
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::error(msg);
+        }
+        return false;
+    }
+
+    if (scope == cli::ScopeFilter::SYSTEM && geteuid() != 0) {
+        std::string msg = "L'installation au niveau système requiert les privilèges administrateur (sudo / pkexec).";
         ProgressEmitter::emit_error(msg);
         if (!ProgressEmitter::is_enabled()) {
             Logger::error(msg);
@@ -476,7 +497,7 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
     ProgressEmitter::emit(10, "Vérification de l'archive...");
 
     auto [app_name, version] = parse_archive_filename(file_path);
-    auto paths = get_paths();
+    auto paths = get_paths(scope);
 
     if (!ProgressEmitter::is_enabled()) {
         std::cout << "\n--- Installation Archive (Tar / Zip) ---\n";
@@ -761,8 +782,10 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
         rec.binary_path = primary_binary_str;
         rec.symlink_path = all_symlinks;
         rec.desktop_path = all_desktops;
+        rec.icon_path = default_icon_str;
         rec.version = version;
         rec.is_system = paths.is_system;
+        rec.scope = paths.is_system ? "system" : "user";
         records.push_back(std::move(rec));
 
         ProgressEmitter::emit(95, "Enregistrement de l'application...");
@@ -784,48 +807,74 @@ bool ArchiveBackend::install(const std::string& file_path, bool assumeyes, const
     }
 }
 
-std::vector<PackageInfo> ArchiveBackend::list_installed() {
+std::vector<PackageInfo> ArchiveBackend::list_installed(cli::ScopeFilter scope) {
     std::vector<PackageInfo> results;
 
     // Utilisateur
-    auto user_paths = get_paths(false);
-    auto user_records = load_manifest(user_paths.manifest_file, false);
-    for (const auto& r : user_records) {
-        PackageInfo info;
-        info.name = r.name;
-        info.id = r.install_dir;
-        info.version = r.version;
-        info.arch = "x86_64";
-        info.source = PackageSource::TAR;
-        info.origin = "archive (user)";
-        results.push_back(std::move(info));
+    if (scope != cli::ScopeFilter::SYSTEM) {
+        auto user_paths = get_paths(cli::ScopeFilter::USER);
+        auto user_records = load_manifest(user_paths.manifest_file, false);
+        for (const auto& r : user_records) {
+            PackageInfo info;
+            info.name = r.name;
+            info.id = r.install_dir;
+            info.version = r.version;
+            info.arch = "x86_64";
+            info.source = PackageSource::TAR;
+            info.origin = "archive (user)";
+            info.is_system = false;
+            results.push_back(std::move(info));
+        }
     }
 
     // Système (/opt/applications)
-    auto sys_paths = get_paths(true);
-    auto sys_records = load_manifest(sys_paths.manifest_file, true);
-    for (const auto& r : sys_records) {
-        PackageInfo info;
-        info.name = r.name;
-        info.id = r.install_dir;
-        info.version = r.version;
-        info.arch = "x86_64";
-        info.source = PackageSource::TAR;
-        info.origin = "archive (système)";
-        results.push_back(std::move(info));
+    if (scope != cli::ScopeFilter::USER) {
+        auto sys_paths = get_paths(cli::ScopeFilter::SYSTEM);
+        auto sys_records = load_manifest(sys_paths.manifest_file, true);
+        for (const auto& r : sys_records) {
+            PackageInfo info;
+            info.name = r.name;
+            info.id = r.install_dir;
+            info.version = r.version;
+            info.arch = "x86_64";
+            info.source = PackageSource::TAR;
+            info.origin = "archive (système)";
+            info.is_system = true;
+            results.push_back(std::move(info));
+        }
     }
 
     return results;
 }
 
-bool ArchiveBackend::is_installed(std::string_view name) {
-    auto user_paths = get_paths(false);
-    auto user_records = load_manifest(user_paths.manifest_file, false);
-    for (const auto& r : user_records) {
-        if (r.name == name) return true;
+bool ArchiveBackend::is_installed(std::string_view name, cli::ScopeFilter scope) {
+    if (scope != cli::ScopeFilter::SYSTEM) {
+        auto user_paths = get_paths(cli::ScopeFilter::USER);
+        auto user_records = load_manifest(user_paths.manifest_file, false);
+        for (const auto& r : user_records) {
+            if (r.name == name) return true;
+        }
     }
 
-    auto sys_paths = get_paths(true);
+    if (scope != cli::ScopeFilter::USER) {
+        auto sys_paths = get_paths(cli::ScopeFilter::SYSTEM);
+        auto sys_records = load_manifest(sys_paths.manifest_file, true);
+        for (const auto& r : sys_records) {
+            if (r.name == name) return true;
+        }
+    }
+
+    return false;
+}
+
+bool ArchiveBackend::is_system(std::string_view name) {
+    auto user_paths = get_paths(cli::ScopeFilter::USER);
+    auto user_records = load_manifest(user_paths.manifest_file, false);
+    for (const auto& r : user_records) {
+        if (r.name == name) return false;
+    }
+
+    auto sys_paths = get_paths(cli::ScopeFilter::SYSTEM);
     auto sys_records = load_manifest(sys_paths.manifest_file, true);
     for (const auto& r : sys_records) {
         if (r.name == name) return true;
@@ -834,67 +883,119 @@ bool ArchiveBackend::is_installed(std::string_view name) {
     return false;
 }
 
-bool ArchiveBackend::remove(const std::vector<std::string>& package_names) {
+bool ArchiveBackend::remove(const std::vector<std::string>& package_names, cli::ScopeFilter scope) {
     if (package_names.empty()) return true;
 
     bool all_ok = true;
 
     for (const auto& pkg : package_names) {
+        ProgressEmitter::emit(10, "Arrêt des processus et préparation...");
+
         bool found = false;
 
         // 1. Espace utilisateur
-        auto user_paths = get_paths(false);
-        auto user_records = load_manifest(user_paths.manifest_file, false);
-        auto uit = std::find_if(user_records.begin(), user_records.end(),
-            [&](const ArchiveRecord& r) { return r.name == pkg; });
+        if (scope != cli::ScopeFilter::SYSTEM) {
+            auto user_paths = get_paths(cli::ScopeFilter::USER);
+            auto user_records = load_manifest(user_paths.manifest_file, false);
+            auto uit = std::find_if(user_records.begin(), user_records.end(),
+                [&](const ArchiveRecord& r) { return r.name == pkg; });
 
-        if (uit != user_records.end()) {
-            found = true;
-            try {
-                if (fs::exists(uit->install_dir)) fs::remove_all(uit->install_dir);
-                remove_semicolon_paths(uit->symlink_path);
-                remove_semicolon_paths(uit->desktop_path);
+            if (uit != user_records.end()) {
+                found = true;
+                try {
+                    ProgressEmitter::emit(30, "Suppression des fichiers du répertoire d'installation...");
+                    std::error_code ec;
+                    if (fs::exists(uit->install_dir)) {
+                        fs::remove_all(uit->install_dir, ec);
+                        if (ec) throw std::runtime_error(ec.message());
+                    }
 
-                user_records.erase(uit);
-                save_manifest(user_paths.manifest_file, user_records);
-                Logger::success("Application archive utilisateur '" + pkg + "' désinstallée avec succès.");
-            } catch (const std::exception& e) {
-                Logger::error("Erreur lors de la désinstallation de '" + pkg + "': " + e.what());
-                all_ok = false;
+                    ProgressEmitter::emit(60, "Suppression du raccourci de commande et du fichier .desktop...");
+                    remove_semicolon_paths(uit->symlink_path);
+                    remove_semicolon_paths(uit->desktop_path);
+                    if (!uit->icon_path.empty() && fs::exists(uit->icon_path)) {
+                        fs::remove(uit->icon_path, ec);
+                    }
+
+                    ProgressEmitter::emit(85, "Mise à jour du registre abpm...");
+                    user_records.erase(uit);
+                    save_manifest(user_paths.manifest_file, user_records);
+
+                    ProgressEmitter::emit(100, "Application archive '" + pkg + "' désinstallée avec succès !");
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::success("Application archive utilisateur '" + pkg + "' désinstallée avec succès.");
+                    }
+                } catch (const std::exception& e) {
+                    std::string err = "Erreur lors de la désinstallation de '" + pkg + "': " + e.what();
+                    ProgressEmitter::emit_error(err);
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::error(err);
+                    }
+                    all_ok = false;
+                }
             }
         }
 
         // 2. Espace système
-        auto sys_paths = get_paths(true);
-        auto sys_records = load_manifest(sys_paths.manifest_file, true);
-        auto sit = std::find_if(sys_records.begin(), sys_records.end(),
-            [&](const ArchiveRecord& r) { return r.name == pkg; });
+        if (!found && scope != cli::ScopeFilter::USER) {
+            auto sys_paths = get_paths(cli::ScopeFilter::SYSTEM);
+            auto sys_records = load_manifest(sys_paths.manifest_file, true);
+            auto sit = std::find_if(sys_records.begin(), sys_records.end(),
+                [&](const ArchiveRecord& r) { return r.name == pkg; });
 
-        if (sit != sys_records.end()) {
-            found = true;
-            if (geteuid() != 0) {
-                Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
-                Logger::info("Relancez avec sudo pour la supprimer : 'sudo abpm remove " + pkg + "'");
-                all_ok = false;
-                continue;
-            }
+            if (sit != sys_records.end()) {
+                found = true;
+                if (geteuid() != 0) {
+                    std::string err = "L'application '" + pkg + "' est installée au niveau système. Privilèges root requis.";
+                    ProgressEmitter::emit_error(err);
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
+                        Logger::info("Relancez avec sudo pour la supprimer : 'sudo abpm remove " + pkg + "'");
+                    }
+                    all_ok = false;
+                    continue;
+                }
 
-            try {
-                if (fs::exists(sit->install_dir)) fs::remove_all(sit->install_dir);
-                remove_semicolon_paths(sit->symlink_path);
-                remove_semicolon_paths(sit->desktop_path);
+                try {
+                    ProgressEmitter::emit(30, "Suppression des fichiers du répertoire d'installation...");
+                    std::error_code ec;
+                    if (fs::exists(sit->install_dir)) {
+                        fs::remove_all(sit->install_dir, ec);
+                        if (ec) throw std::runtime_error(ec.message());
+                    }
 
-                sys_records.erase(sit);
-                save_manifest(sys_paths.manifest_file, sys_records);
-                Logger::success("Application archive système '" + pkg + "' désinstallée avec succès.");
-            } catch (const std::exception& e) {
-                Logger::error("Erreur lors de la désinstallation de '" + pkg + "': " + e.what());
-                all_ok = false;
+                    ProgressEmitter::emit(60, "Suppression du raccourci de commande et du fichier .desktop...");
+                    remove_semicolon_paths(sit->symlink_path);
+                    remove_semicolon_paths(sit->desktop_path);
+                    if (!sit->icon_path.empty() && fs::exists(sit->icon_path)) {
+                        fs::remove(sit->icon_path, ec);
+                    }
+
+                    ProgressEmitter::emit(85, "Mise à jour du registre abpm...");
+                    sys_records.erase(sit);
+                    save_manifest(sys_paths.manifest_file, sys_records);
+
+                    ProgressEmitter::emit(100, "Application archive '" + pkg + "' désinstallée avec succès !");
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::success("Application archive système '" + pkg + "' désinstallée avec succès.");
+                    }
+                } catch (const std::exception& e) {
+                    std::string err = "Erreur lors de la désinstallation de '" + pkg + "': " + e.what();
+                    ProgressEmitter::emit_error(err);
+                    if (!ProgressEmitter::is_enabled()) {
+                        Logger::error(err);
+                    }
+                    all_ok = false;
+                }
             }
         }
 
         if (!found) {
-            Logger::error("Aucune application archive nommée '" + pkg + "' n'a été trouvée.");
+            std::string err = "Aucune application archive nommée '" + pkg + "' n'a été trouvée.";
+            ProgressEmitter::emit_error(err);
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::error(err);
+            }
             all_ok = false;
         }
     }

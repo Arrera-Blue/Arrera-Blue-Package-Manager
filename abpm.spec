@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.6
+Version:        2026.1.7
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -76,6 +76,13 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Sat Nov 07 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.7-1
+- Correction du statut is_system dans abpm list --json (archives/AppImages dans /var/lib/abpm et Flatpak systeme).
+- Ajout des options de portee --system et --user dans le CLI (list, install, remove).
+- Fiabilisation des codes d'erreur de abpm remove (exit 1 en cas d'erreur ou d'absence de droits root).
+- Support du protocole --progress et PROGRESS:ERROR pour les suppressions et installations d'Archives et d'AppImages.
+- Enrichissement des manifestes JSON avec is_system, scope et icon_path.
+
 * Sat Nov 07 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.6-1
 - Ajout de l'option --json pour abpm check avec categorisation des paquets (app, utility, system) pour Blue Hub.
 - Support des mises a jour ciblees dans abpm update (abpm update [PKG...]).

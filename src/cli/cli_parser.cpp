@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.6");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.7");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -36,6 +36,9 @@ void CliParser::print_help() {
               << "  --appimage <FICHIER>    Installer / lister des applications AppImage\n"
               << "  --tar <FICHIER>         Installer / lister des applications en archives (tar, zip)\n"
               << "  --icon <FICHIER>        Definir l'icone a utiliser lors de l'installation\n\n"
+              << "OPTIONS DE PORTEE (SCOPE):\n"
+              << "  --system                Cibler uniquement l'environnement systeme (/opt, /var/lib/abpm)\n"
+              << "  --user                  Cibler uniquement l'environnement utilisateur (~/.local/share/abpm)\n\n"
               << "OPTIONS GENERALES:\n"
               << "  --page <N>              Numero de la page a charger (defaut: 1)\n"
               << "  --per-page <N>          Nombre d'applications par page (defaut: 6)\n"
@@ -105,6 +108,10 @@ CliOptions CliParser::parse(int argc, char* argv[]) {
             options.filter = SourceFilter::DNF;
         } else if (arg == "--flatpak") {
             options.filter = SourceFilter::FLATPAK;
+        } else if (arg == "--system") {
+            options.scope = ScopeFilter::SYSTEM;
+        } else if (arg == "--user") {
+            options.scope = ScopeFilter::USER;
         } else if (arg == "--rpm") {
             options.filter = SourceFilter::RPM;
         } else if (arg == "--appimage") {

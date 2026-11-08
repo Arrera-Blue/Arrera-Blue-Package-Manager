@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.8
+Version:        2026.1.8.5
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -78,6 +78,10 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Sun Nov 08 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.8.5-1
+- Ajout de l'attribut is_testing dans abpm repo list --json pour isoler les depots de test dans Blue Hub.
+- Detection automatique des depots instables ou de test (mots-cles : testing, test, caution).
+
 * Sun Nov 08 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.8-1
 - Ajout du sous-systeme abpm repo (list, enable, disable, add) avec protection des depots critiques.
 - Ajout du sous-systeme abpm config (get, set) et synchronisation systemd abpm-auto-update.timer.

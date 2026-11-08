@@ -14,6 +14,7 @@
 #include <sstream>
 #include <algorithm>
 #include <unistd.h>
+#include <cctype>
 
 namespace abpm::repo {
 
@@ -62,6 +63,7 @@ std::vector<RepoItem> RepoBackend::list_repos() {
             item.type = "rpm";
             item.enabled = repo->is_enabled();
             item.is_protected = is_protected(item.id, "rpm");
+            item.is_testing = is_testing(item.id, item.name);
 
             std::string url;
             if (!conf.get_metalink_option().empty()) {
@@ -99,6 +101,7 @@ std::vector<RepoItem> RepoBackend::list_repos() {
                 item.type = "flatpak";
                 item.enabled = enabled;
                 item.is_protected = is_protected(id, "flatpak");
+                item.is_testing = is_testing(item.id, item.name);
                 item.url = url;
                 repos.push_back(std::move(item));
             }
@@ -119,6 +122,7 @@ std::string RepoBackend::to_json(const std::vector<RepoItem>& repos) {
         ss << "    \"type\": \"" << Categorizer::escape_json(r.type) << "\",\n";
         ss << "    \"enabled\": " << (r.enabled ? "true" : "false") << ",\n";
         ss << "    \"is_protected\": " << (r.is_protected ? "true" : "false") << ",\n";
+        ss << "    \"is_testing\": " << (r.is_testing ? "true" : "false") << ",\n";
         ss << "    \"url\": \"" << Categorizer::escape_json(r.url) << "\"\n";
         ss << "  }" << (i + 1 < repos.size() ? "," : "") << "\n";
     }
@@ -131,10 +135,11 @@ void RepoBackend::print_terminal_repos(const std::vector<RepoItem>& repos) {
     for (const auto& r : repos) {
         std::string status = r.enabled ? "\033[1;32m[Activé]\033[0m" : "\033[1;31m[Désactivé]\033[0m";
         std::string prot = r.is_protected ? " \033[1;33m[Protégé]\033[0m" : "";
+        std::string test_badge = r.is_testing ? " \033[1;35m[Test/Instable]\033[0m" : "";
         std::string type_badge = (r.type == "rpm") ? "\033[1;36m[RPM]\033[0m" : "\033[1;34m[Flatpak]\033[0m";
 
         std::cout << " • " << type_badge << " " << "\033[1m" << std::left << std::setw(30) << r.id << "\033[0m "
-                  << status << prot << "\n";
+                  << status << prot << test_badge << "\n";
         std::cout << "   Nom : " << r.name << "\n";
         if (!r.url.empty()) {
             std::cout << "   URL : " << r.url << "\n";
@@ -227,6 +232,28 @@ bool RepoBackend::add_repo(const std::string& url_or_file) {
     }
 
     Logger::error("Échec de l'ajout du dépôt RPM depuis '" + url_or_file + "'.");
+    return false;
+}
+
+bool RepoBackend::is_testing(const std::string& id, const std::string& name) {
+    auto to_lower = [](std::string_view sv) {
+        std::string res;
+        res.reserve(sv.size());
+        for (char c : sv) {
+            res.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+        return res;
+    };
+
+    std::string lower_id = to_lower(id);
+    std::string lower_name = to_lower(name);
+
+    const std::string keywords[] = {"testing", "test", "caution"};
+    for (const auto& kw : keywords) {
+        if (lower_id.find(kw) != std::string::npos || lower_name.find(kw) != std::string::npos) {
+            return true;
+        }
+    }
     return false;
 }
 

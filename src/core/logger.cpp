@@ -16,7 +16,7 @@ namespace Color {
 void Logger::banner() {
     std::cout << Color::BLUE << Color::BOLD
               << "=================================================\n"
-              << "   Arrera Blue Package Manager (abpm) v2026.1.8  \n"
+              << "  Arrera Blue Package Manager (abpm) v2026.1.8.5 \n"
               << "================================================="
               << Color::RESET << "\n\n";
 }

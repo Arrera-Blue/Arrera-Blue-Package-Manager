@@ -8,9 +8,10 @@ namespace abpm::repo {
 struct RepoItem {
     std::string id;
     std::string name;
-    std::string type;         // "rpm" ou "flatpak"
+    std::string type;         
     bool enabled{true};
     bool is_protected{false};
+    bool is_testing{false};   
     std::string url;
 };
 
@@ -27,6 +28,9 @@ public:
 
     // Vérifie si un dépôt est protégé contre la désactivation
     static bool is_protected(const std::string& repo_id, const std::string& type = "");
+
+    // Vérifie si un dépôt est un dépôt de test ou à risque (testing, test, caution)
+    static bool is_testing(const std::string& repo_id, const std::string& name);
 
     // Active un dépôt
     static bool enable_repo(const std::string& repo_id);

@@ -15,6 +15,7 @@ public:
     static std::vector<core::UpdateInfo> check_updates();
     static bool update(const std::vector<std::string>& target_apps = {});
     static bool install(std::string_view app_name, bool assumeyes);
+    static bool install(const std::vector<std::string>& app_names, bool assumeyes);
     static std::string find_installed_ref(std::string_view name_or_id, cli::ScopeFilter scope = cli::ScopeFilter::AUTO);
     static bool is_system_ref(std::string_view name_or_id);
     static bool remove(const std::vector<std::string>& formatted_refs);

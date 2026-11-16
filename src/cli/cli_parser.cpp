@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.8.5");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.9");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -19,7 +19,7 @@ void CliParser::print_help() {
               << "COMMANDES PRINCIPALES:\n"
               << "  update                  Met a jour les depots et effectue toutes les mises a jour\n"
               << "  check                   Affiche la liste des mises a jour disponibles\n"
-              << "  install [OPTIONS] <PKG> Installe un paquet (priorite DNF puis Flathub)\n"
+              << "  install [OPTIONS] <PKG...> Installe un ou plusieurs paquets (priorite DNF puis Flathub)\n"
               << "  remove <PKG...>         Desinstalle un ou plusieurs paquets\n"
               << "  search [OPTIONS] <PKG>  Recherche un paquet disponible\n"
               << "  list [OPTIONS]          Liste les paquets installes\n"

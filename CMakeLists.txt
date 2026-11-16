@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(abpm
-    VERSION 2026.1.8.5
+    VERSION 2026.1.9
     DESCRIPTION "Arrera Blue Package Manager"
     LANGUAGES CXX
 )

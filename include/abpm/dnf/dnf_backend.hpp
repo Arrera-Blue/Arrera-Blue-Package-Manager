@@ -15,11 +15,13 @@ public:
     static std::vector<core::UpdateInfo> check_updates(bool silent = false);
     static bool update(const std::vector<std::string>& target_packages = {});
     static bool install(std::string_view package_name, bool assumeyes);
+    static bool install(const std::vector<std::string>& package_names, bool assumeyes);
     static bool is_installed(std::string_view name);
     static bool is_available(std::string_view package_name);
     static std::vector<std::string> get_available_packages(const std::vector<std::string>& names);
     static bool remove(const std::vector<std::string>& package_names);
     static bool install_local_rpm(const std::string& file_path, bool assumeyes);
+    static bool install_local_rpm(const std::vector<std::string>& file_paths, bool assumeyes);
     enum class CleanTarget {
         ALL,
         EXPIRE_CACHE,

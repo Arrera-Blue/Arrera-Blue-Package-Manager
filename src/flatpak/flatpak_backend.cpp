@@ -334,37 +334,64 @@ bool FlatpakBackend::update(const std::vector<std::string>& target_apps) {
 }
 
 bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
-    ProgressEmitter::emit(5, "Recherche de l'application sur Flathub...");
+    return install(std::vector<std::string>{std::string(app_name)}, assumeyes);
+}
 
-    // 1. Rechercher les correspondances sur Flathub
-    auto candidates = search(app_name);
-    if (candidates.empty()) {
-        return false;
+bool FlatpakBackend::install(const std::vector<std::string>& app_names, bool assumeyes) {
+    if (app_names.empty()) return true;
+
+    ProgressEmitter::emit(5, "Recherche des applications sur Flathub...");
+
+    std::vector<PackageInfo> chosen_apps;
+    std::vector<std::string> not_found;
+
+    for (const auto& app_name : app_names) {
+        auto candidates = search(app_name);
+        if (candidates.empty()) {
+            not_found.push_back(app_name);
+            continue;
+        }
+        PackageInfo chosen = candidates[0];
+        std::string needle = to_lower(app_name);
+        for (const auto& c : candidates) {
+            std::string lower_id = to_lower(c.id);
+            if (lower_id == needle || lower_id.ends_with("." + needle)) {
+                chosen = c;
+                break;
+            }
+        }
+        chosen_apps.push_back(chosen);
     }
-    // Choisir la meilleure correspondance (correspondance exacte d'ID en priorité)
-    PackageInfo chosen = candidates[0];
-    std::string needle = to_lower(app_name);
-    for (const auto& c : candidates) {
-        std::string lower_id = to_lower(c.id);
-        if (lower_id == needle || lower_id.ends_with("." + needle)) {
-            chosen = c;
-            break;
+
+    if (!not_found.empty()) {
+        for (const auto& nf : not_found) {
+            Logger::warning("L'application Flatpak '" + nf + "' est introuvable sur Flathub.");
         }
     }
+
+    if (chosen_apps.empty()) {
+        Logger::error("Aucune des applications Flatpak spécifiées n'a été trouvée.");
+        return false;
+    }
+
     // 2. Afficher ce qui va être installé
     if (!ProgressEmitter::is_enabled()) {
-        std::cout << "\n--- Application Flatpak trouvée sur " << chosen.origin << " ---\n"
-                  << " • " << chosen.id << " [" << chosen.origin << " / " << chosen.version << "]\n\n";
+        std::cout << "\n--- Application(s) Flatpak à installer (" << chosen_apps.size() << ") ---\n";
+        for (const auto& app : chosen_apps) {
+            std::cout << " • " << app.name << " [" << app.id << " / " << app.origin << " v" << app.version << "]\n";
+        }
+        std::cout << "\n";
     }
+
     // 3. Demander confirmation
     if (!assumeyes) {
-        if (!Logger::confirm("Voulez-vous installer cette application Flatpak ?")) {
+        if (!Logger::confirm("Voulez-vous installer ces applications Flatpak ?")) {
             Logger::info("Installation annulée.");
             return true;
         }
     }
 
-    ProgressEmitter::emit(15, "Préparation de l'installation de " + chosen.name + " via Flatpak...");
+    ProgressEmitter::emit(15, "Préparation de l'installation Flatpak...");
 
     // 4. Lancer la transaction d'installation
     g_autoptr(GError) err = nullptr;
@@ -383,14 +410,20 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
         Logger::error(err_msg);
         return false;
     }
-    // Formater le ref (ex: app/org.videolan.VLC/x86_64/stable)
+
+    // Formater et ajouter les refs
     const char* default_arch = flatpak_get_default_arch();
-    std::string full_ref = "app/" + chosen.id + "/" + (default_arch ? default_arch : "x86_64") + "/stable";
-    g_autoptr(GError) add_err = nullptr;
-    if (!flatpak_transaction_add_install(tx, chosen.origin.c_str(), full_ref.c_str(), nullptr, &add_err)) {
-        std::string err_msg = std::string("Erreur préparation Flatpak : ") + (add_err ? add_err->message : "inconnue");
-        ProgressEmitter::emit_error(err_msg);
-        Logger::error(err_msg);
+    for (const auto& app : chosen_apps) {
+        std::string full_ref = "app/" + app.id + "/" + (default_arch ? default_arch : "x86_64") + "/stable";
+        g_autoptr(GError) add_err = nullptr;
+        if (!flatpak_transaction_add_install(tx, app.origin.c_str(), full_ref.c_str(), nullptr, &add_err)) {
+            std::string err_msg = std::string("Erreur préparation Flatpak pour " + app.id + " : ") + (add_err ? add_err->message : "inconnue");
+            Logger::warning(err_msg);
+        }
+    }
+
+    if (flatpak_transaction_is_empty(tx)) {
+        Logger::error("Aucune opération à exécuter dans la transaction Flatpak.");
         return false;
     }
 
@@ -405,7 +438,6 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
             g_signal_connect(progress, "changed", G_CALLBACK(+[](FlatpakTransactionProgress* p, gpointer) {
                 if (ProgressEmitter::is_enabled()) {
                     int p_val = flatpak_transaction_progress_get_progress(p);
-                    // Progression globale mappée de 15% à 95%
                     int global_pct = 15 + static_cast<int>(p_val * 0.80);
                     char* status = flatpak_transaction_progress_get_status(p);
                     std::string msg = (status && strlen(status) > 0) ? status : "Téléchargement et installation Flatpak...";
@@ -417,7 +449,7 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
     }), nullptr);
 
     if (!ProgressEmitter::is_enabled()) {
-        Logger::info("Téléchargement et installation de l'application...");
+        Logger::info("Téléchargement et installation des applications Flatpak...");
     }
     g_autoptr(GError) run_err = nullptr;
     if (!flatpak_transaction_run(tx, nullptr, &run_err)) {
@@ -426,9 +458,9 @@ bool FlatpakBackend::install(std::string_view app_name, bool assumeyes) {
         Logger::error(err_msg);
         return false;
     }
-    ProgressEmitter::emit(100, "Installation de " + chosen.name + " terminée avec succès");
+    ProgressEmitter::emit(100, "Installation Flatpak terminée avec succès");
     if (!ProgressEmitter::is_enabled()) {
-        Logger::success("Application Flatpak '" + chosen.id + "' installée avec succès !");
+        Logger::success("Applications Flatpak installées avec succès !");
     }
     return true;
 }

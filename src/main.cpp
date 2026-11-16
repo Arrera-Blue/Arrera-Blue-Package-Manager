@@ -14,6 +14,8 @@
 #include <iostream>
 #include <sstream> 
 #include <unistd.h>
+#include <algorithm>
+#include <set>
 
 using abpm::core::Logger;
 using abpm::core::ProgressEmitter;
@@ -387,102 +389,111 @@ int main(int argc, char* argv[]) {
                 if (ProgressEmitter::is_enabled()) {
                     ProgressEmitter::emit_error("Aucun paquet spécifié pour l'installation.");
                 } else {
-                    Logger::error("Spécifiez un paquet ou une application à installer (ex: abpm install vlc)");
+                    Logger::error("Spécifiez au moins un paquet ou une application à installer (ex: abpm install vlc gimp)");
                 }
                 return 1;
             }
-            const auto& pkg_name = options.arguments[0];
+
             if (!ProgressEmitter::is_enabled()) {
                 Logger::banner();
-                Logger::info("Préparation de l'installation de '" + pkg_name + "'...");
+                Logger::info("Préparation de l'installation...");
             } else {
-                ProgressEmitter::emit(0, "Démarrage de l'installation de " + pkg_name + "...");
+                ProgressEmitter::emit(0, "Démarrage de l'installation...");
             }
-            bool handled = false;
-            // Cas 0 : Installation d'un fichier RPM local (--rpm)
+
+            // Cas 0 : Fichiers RPM locaux (--rpm)
             if (options.filter == SourceFilter::RPM) {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Installation du fichier RPM local : " + pkg_name);
-                }
-                if (!DnfBackend::install_local_rpm(pkg_name, options.assumeyes)) {
+                if (!DnfBackend::install_local_rpm(options.arguments, options.assumeyes)) {
                     return 1;
                 }
-                handled = true;
+                break;
             }
-            // Cas 0.5 : Installation d'une AppImage (--appimage)
-            else if (options.filter == SourceFilter::APPIMAGE) {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Installation du fichier AppImage : " + pkg_name);
+
+            // Cas 0.5 : Fichiers AppImage (--appimage)
+            if (options.filter == SourceFilter::APPIMAGE) {
+                bool all_ok = true;
+                for (const auto& file : options.arguments) {
+                    if (!AppImageBackend::install(file, options.assumeyes, options.custom_icon, options.scope)) {
+                        all_ok = false;
+                    }
                 }
-                if (!AppImageBackend::install(pkg_name, options.assumeyes, options.custom_icon, options.scope)) {
-                    return 1;
-                }
-                handled = true;
+                if (!all_ok) return 1;
+                break;
             }
-            // Cas 0.8 : Installation d'une archive Tar / Zip (--tar)
-            else if (options.filter == SourceFilter::TAR) {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Installation du fichier d'archive : " + pkg_name);
+
+            // Cas 0.8 : Fichiers Archives Tar / Zip (--tar)
+            if (options.filter == SourceFilter::TAR) {
+                bool all_ok = true;
+                for (const auto& file : options.arguments) {
+                    if (!ArchiveBackend::install(file, options.assumeyes, options.custom_icon, options.scope)) {
+                        all_ok = false;
+                    }
                 }
-                if (!ArchiveBackend::install(pkg_name, options.assumeyes, options.custom_icon, options.scope)) {
-                    return 1;
-                }
-                handled = true;
+                if (!all_ok) return 1;
+                break;
             }
+
             // Cas 1 : Forcer DNF (--dnf)
-            else if (options.filter == SourceFilter::DNF) {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Recherche dans les dépôts DNF...");
-                }
-                if (DnfBackend::install(pkg_name, options.assumeyes)) {
-                    handled = true;
-                } else {
-                    std::string err_msg = "Le paquet '" + pkg_name + "' est introuvable dans DNF.";
-                    ProgressEmitter::emit_error(err_msg);
-                    if (!ProgressEmitter::is_enabled()) {
-                        Logger::error(err_msg);
-                    }
+            if (options.filter == SourceFilter::DNF) {
+                if (!DnfBackend::install(options.arguments, options.assumeyes)) {
                     return 1;
                 }
+                break;
             }
+
             // Cas 2 : Forcer Flatpak (--flatpak)
-            else if (options.filter == SourceFilter::FLATPAK) {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Recherche sur Flathub / Flatpak...");
-                }
-                if (FlatpakBackend::install(pkg_name, options.assumeyes)) {
-                    handled = true;
-                } else {
-                    std::string err_msg = "L'application '" + pkg_name + "' est introuvable sur Flathub.";
-                    ProgressEmitter::emit_error(err_msg);
-                    if (!ProgressEmitter::is_enabled()) {
-                        Logger::error(err_msg);
-                    }
+            if (options.filter == SourceFilter::FLATPAK) {
+                if (!FlatpakBackend::install(options.arguments, options.assumeyes)) {
                     return 1;
                 }
+                break;
             }
+
             // Cas 3 : Cascade intelligente par défaut (DNF en priorité, puis Flathub)
-            else {
-                if (!ProgressEmitter::is_enabled()) {
-                    Logger::info("Recherche en priorité dans les dépôts DNF...");
-                }
-                if (DnfBackend::install(pkg_name, options.assumeyes)) {
-                    handled = true;
+            auto dnf_found = DnfBackend::get_available_packages(options.arguments);
+            std::set<std::string> dnf_set(dnf_found.begin(), dnf_found.end());
+
+            std::vector<std::string> dnf_to_install;
+            std::vector<std::string> flatpak_to_install;
+            std::vector<std::string> not_found;
+
+            for (const auto& arg : options.arguments) {
+                if (dnf_set.count(arg)) {
+                    dnf_to_install.push_back(arg);
                 } else {
-                    if (!ProgressEmitter::is_enabled()) {
-                        Logger::info("Introuvable dans DNF. Recherche sur Flathub...");
-                    }
-                    if (FlatpakBackend::install(pkg_name, options.assumeyes)) {
-                        handled = true;
+                    auto fp_candidates = FlatpakBackend::search(arg);
+                    if (!fp_candidates.empty()) {
+                        flatpak_to_install.push_back(arg);
+                    } else {
+                        not_found.push_back(arg);
                     }
                 }
             }
-            if (!handled) {
-                std::string err_msg = "Le paquet ou l'application '" + pkg_name + "' est introuvable ni dans DNF ni sur Flathub.";
-                ProgressEmitter::emit_error(err_msg);
+
+            for (const auto& missing : not_found) {
+                std::string msg = "Le paquet ou l'application '" + missing + "' est introuvable ni dans DNF ni sur Flathub.";
+                ProgressEmitter::emit_error(msg);
                 if (!ProgressEmitter::is_enabled()) {
-                    Logger::error(err_msg);
+                    Logger::warning(msg);
                 }
+            }
+
+            if (dnf_to_install.empty() && flatpak_to_install.empty()) {
+                Logger::error("Aucun des paquets spécifiés n'a été trouvé.");
+                return 1;
+            }
+
+            bool dnf_ok = true;
+            bool flatpak_ok = true;
+
+            if (!dnf_to_install.empty()) {
+                dnf_ok = DnfBackend::install(dnf_to_install, options.assumeyes);
+            }
+            if (!flatpak_to_install.empty()) {
+                flatpak_ok = FlatpakBackend::install(flatpak_to_install, options.assumeyes);
+            }
+
+            if (!not_found.empty() || !dnf_ok || !flatpak_ok) {
                 return 1;
             }
             break;
@@ -522,67 +533,79 @@ int main(int argc, char* argv[]) {
             std::vector<std::string> dnf_to_remove;
             std::vector<std::string> flatpak_to_remove;
             std::vector<std::string> not_found;
+            std::vector<std::string> need_root_pkgs;
 
             bool has_error = false;
 
             for (const auto& pkg : options.arguments) {
+                bool found = false;
+
                 // 1. Vérifier si c'est une application archive (tar / zip)
-                if (ArchiveBackend::is_installed(pkg, options.scope)) {
+                if ((options.filter == SourceFilter::ALL || options.filter == SourceFilter::TAR) &&
+                    ArchiveBackend::is_installed(pkg, options.scope)) {
                     if (ArchiveBackend::is_system(pkg) && geteuid() != 0) {
-                        std::string msg = "L'application '" + pkg + "' est installée au niveau système. Privilèges root requis.";
-                        ProgressEmitter::emit_error(msg);
-                        if (!ProgressEmitter::is_enabled()) {
-                            Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
-                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
-                        }
+                        need_root_pkgs.push_back(pkg);
                         has_error = true;
-                        continue;
+                    } else {
+                        archive_to_remove.push_back(pkg);
                     }
-                    archive_to_remove.push_back(pkg);
+                    found = true;
                     continue;
                 }
 
                 // 2. Vérifier si c'est une application AppImage
-                if (AppImageBackend::is_installed(pkg, options.scope)) {
+                if ((options.filter == SourceFilter::ALL || options.filter == SourceFilter::APPIMAGE) &&
+                    AppImageBackend::is_installed(pkg, options.scope)) {
                     if (AppImageBackend::is_system(pkg) && geteuid() != 0) {
-                        std::string msg = "L'application '" + pkg + "' est installée au niveau système. Privilèges root requis.";
-                        ProgressEmitter::emit_error(msg);
-                        if (!ProgressEmitter::is_enabled()) {
-                            Logger::warning("L'application '" + pkg + "' est installée au niveau système.");
-                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
-                        }
+                        need_root_pkgs.push_back(pkg);
                         has_error = true;
-                        continue;
+                    } else {
+                        appimage_to_remove.push_back(pkg);
                     }
-                    appimage_to_remove.push_back(pkg);
+                    found = true;
                     continue;
                 }
 
                 // 3. Vérifier si c'est une application Flatpak
-                std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg, options.scope);
-                if (!flatpak_ref.empty()) {
-                    flatpak_to_remove.push_back(flatpak_ref);
-                    continue;
+                if (options.filter == SourceFilter::ALL || options.filter == SourceFilter::FLATPAK) {
+                    std::string flatpak_ref = FlatpakBackend::find_installed_ref(pkg, options.scope);
+                    if (!flatpak_ref.empty()) {
+                        flatpak_to_remove.push_back(flatpak_ref);
+                        found = true;
+                        continue;
+                    }
                 }
 
                 // 4. Vérifier si c'est un paquet DNF (exclu si scope == USER)
-                if (options.scope != ScopeFilter::USER && DnfBackend::is_installed(pkg)) {
+                if ((options.filter == SourceFilter::ALL || options.filter == SourceFilter::DNF || options.filter == SourceFilter::RPM) &&
+                    options.scope != ScopeFilter::USER && DnfBackend::is_installed(pkg)) {
                     if (geteuid() != 0) {
-                        std::string msg = "Le paquet '" + pkg + "' est un composant système DNF. Privilèges root requis.";
-                        ProgressEmitter::emit_error(msg);
-                        if (!ProgressEmitter::is_enabled()) {
-                            Logger::warning("Le paquet '" + pkg + "' est installé au niveau système DNF.");
-                            Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkg + "'");
-                        }
+                        need_root_pkgs.push_back(pkg);
                         has_error = true;
-                        continue;
+                    } else {
+                        dnf_to_remove.push_back(pkg);
                     }
-                    dnf_to_remove.push_back(pkg);
+                    found = true;
                     continue;
                 }
 
                 // 5. Introuvable
-                not_found.push_back(pkg);
+                if (!found) {
+                    not_found.push_back(pkg);
+                }
+            }
+
+            if (!need_root_pkgs.empty()) {
+                std::string pkgs_str;
+                for (size_t i = 0; i < need_root_pkgs.size(); ++i) {
+                    pkgs_str += (i > 0 ? " " : "") + need_root_pkgs[i];
+                }
+                std::string msg = "Des paquets nécessitent les privilèges administrateur (root) : " + pkgs_str;
+                ProgressEmitter::emit_error(msg);
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::warning(msg);
+                    Logger::info("Relancez avec sudo : 'sudo abpm remove " + pkgs_str + "'");
+                }
             }
 
             for (const auto& missing : not_found) {

@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.8.5
+Version:        2026.1.9
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -78,6 +78,12 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Mon Nov 16 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.9-1
+- Support complet de l'installation et de la desinstallation multi-paquets simultanee (abpm install et abpm remove).
+- Resolution globale en transaction unique pour DNF et Flatpak.
+- Regroupement des messages d'avertissement de privileges root pour les actions groupées.
+- Prise en compte des filtres de source (--dnf, --flatpak, --rpm, --appimage, --tar) dans remove.
+
 * Sun Nov 08 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.8.5-1
 - Ajout de l'attribut is_testing dans abpm repo list --json pour isoler les depots de test dans Blue Hub.
 - Detection automatique des depots instables ou de test (mots-cles : testing, test, caution).

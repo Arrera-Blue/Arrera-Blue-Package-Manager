@@ -15,14 +15,14 @@
 
 ### Install
 
-- `install [PAQUET]` : Lance le programme d'installation en cherchant en priorité dans DNF. S'il ne trouve pas, il cherche dans Flathub. Avant de lancer l'installation, il affiche ce qu'il va installer pour confirmation.
-- `install --dnf [PAQUET]` : Lance le programme d'installation en appelant uniquement DNF.
-- `install --flatpak [PAQUET]` : Lance le programme d'installation en appelant uniquement Flatpak.
-- `install --rpm [FICHIER_RPM]` : Installation d'un paquet RPM local (comme DNF sous Fedora).
-- `install --appimage [FICHIER_APPIMAGE]` : Installation et intégration d'une application au format AppImage (avec extraction automatique de l'icône dans `.icons/`).
-- `install --tar [FICHIER_ARCHIVE]` : Installation d'une application distribuée sous forme d'archive tar ou zip (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar`, `.zip`). Détecte les binaires, recherche les icônes PNG candidates et propose une sélection interactive si plusieurs icônes sont présentes.
+- `install [PAQUET...]` : Lance le programme d'installation pour un ou plusieurs paquets/applications. Cherche en priorité dans DNF, puis dans Flathub pour les applications non trouvées. Affiche un récapitulatif complet et demande confirmation avant l'installation groupée.
+- `install --dnf [PAQUET...]` : Installe un ou plusieurs paquets en ciblant uniquement DNF en une seule transaction.
+- `install --flatpak [PAQUET...]` : Installe une ou plusieurs applications en ciblant uniquement Flatpak / Flathub.
+- `install --rpm [FICHIER_RPM...]` : Installation d'un ou plusieurs paquets RPM locaux en une seule transaction.
+- `install --appimage [FICHIER_APPIMAGE...]` : Installation et intégration d'une ou plusieurs applications au format AppImage (avec extraction automatique des icônes dans `.icons/`).
+- `install --tar [FICHIER_ARCHIVE...]` : Installation d'une ou plusieurs applications distribuées sous forme d'archive tar ou zip (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar`, `.zip`). Détecte les binaires et propose la sélection d'icônes.
 - `install [OPTIONS] --icon [FICHIER_IMAGE] [APPLICATION]` : Permet de spécifier directement une icône lors de l'installation d'une archive ou d'une AppImage sans passer par la détection automatique.
-- `install [OPTIONS] --progress [PAQUET]` : Émet un flux textuel non tamponné (`PROGRESS:<PCT>:<MESSAGE>` ou `PROGRESS:ERROR:<MSG>`) sans style ANSI ni bannières, permettant aux interfaces graphiques (**Blue Hub**) d'afficher la progression en temps réel. Active implicitement le mode non interactif (`-y`).
+- `install [OPTIONS] --progress [PAQUET...]` : Émet un flux textuel non tamponné (`PROGRESS:<PCT>:<MESSAGE>` ou `PROGRESS:ERROR:<MSG>`) sans style ANSI ni bannières, permettant aux interfaces graphiques (**Blue Hub**) d'afficher la progression en temps réel. Active implicitement le mode non interactif (`-y`).
 
 ### Set-Icon
 

@@ -147,15 +147,15 @@ sudo abpm clean all
 `abpm install` features automatic source resolution. If no source filter is explicitly specified, it looks up the package in **DNF** repositories first; if not found, it queries **Flathub**.
 
 ```bash
-# Smart multi-source installation
-abpm install vlc
+# Smart multi-source installation (single or multiple packages)
+abpm install vlc gimp code
 
-# Force specific distribution source
-abpm install --dnf htop
-abpm install --flatpak org.mozilla.firefox
+# Force specific distribution source for multiple packages
+abpm install --dnf htop tree
+abpm install --flatpak org.mozilla.firefox org.telegram.desktop
 
 # Local RPM installation with DNF5 dependency resolution & progress callbacks
-abpm install --rpm package-1.0.rpm
+abpm install --rpm package-1.0.rpm package-2.0.rpm
 
 # Standalone AppImage installation
 abpm install --appimage arduino-ide.AppImage

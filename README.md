@@ -73,7 +73,7 @@
 - `repo list --json` : Sortie brute en JSON standardisé pour les Préférences de **Blue Hub** (champs `id`, `name`, `type`, `enabled`, `is_protected`, `is_testing`, `url`).
 - `repo enable [ID]` : Active un dépôt logiciel RPM ou remote Flatpak désactivé. *(Nécessite sudo)*
 - `repo disable [ID]` : Désactive un dépôt logiciel. Refuse strictement l'opération si le dépôt est indispensable au système Arrera Blue (`is_protected: true`). *(Nécessite sudo)*
-- `repo add [URL_OU_FICHIER]` : Ajoute un nouveau dépôt RPM au système depuis un fichier `.repo` ou une URL. *(Nécessite sudo)*
+- `repo add [CIBLE]` : Ajoute un dépôt Fedora Copr (`user/projet`, `copr:user/projet`, URL web Copr) ou un dépôt RPM classique (URL ou fichier `.repo`). Pour Copr, cible automatiquement le socle Fedora 44 (`fedora-44-<arch>`) afin de contourner l'identifiant de version `2026` d'Arrera Blue OS. *(Nécessite sudo)*
 
 ### Configuration & Mises à Jour Automatiques (Config)
 

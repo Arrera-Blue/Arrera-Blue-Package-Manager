@@ -426,10 +426,26 @@ Disables a non-essential repository. Protects core system repositories (`fedora`
 sudo abpm repo disable rpmfusion-free
 ```
 
-#### `abpm repo add <URL_OR_FILE>`
-Adds a new RPM repository file (.repo) from a local path or remote URL. Requires administrator (`sudo`) privileges.
+#### `abpm repo add <CIBLE>`
+Adds a new RPM repository (.repo) from a local path or remote URL, or natively configures a **Fedora Copr** repository. Requires administrator (`sudo`) privileges.
+
+##### Fedora Copr Integration
+On Arrera Blue OS 2026, `/etc/os-release` specifies `VERSION_ID=2026`. Because Fedora Copr does not recognize `fedora-2026`, running plain `dnf copr enable` fails with HTTP 404 errors. `abpm repo add` dynamically extracts the underlying Fedora base release (Fedora 44 via `REDHAT_SUPPORT_PRODUCT_VERSION` or `REDHAT_BUGZILLA_PRODUCT_VERSION`) and machine architecture (`x86_64`, `aarch64`), targeting the exact chroot (`fedora-44-<arch>`). If standard Copr enablement fails, it automatically falls back to fetching the generated `.repo` file directly from Copr (`https://copr.fedorainfracloud.org/coprs/<owner>/<project>/repo/fedora-<ver>/...`).
+
+Supported formats:
 ```bash
-sudo abpm repo add https://example.com/repo/custom.repo
+# Add a Copr repository via owner/project
+sudo abpm repo add sentriz/clipcat
+
+# Add with explicit copr: prefix
+sudo abpm repo add copr:vlink/games
+
+# Add via web Copr URL
+sudo abpm repo add https://copr.fedorainfracloud.org/coprs/batou/mon-projet/
+
+# Add a classic .repo file (local or URL)
+sudo abpm repo add https://download.virtualbox.org/virtualbox/rpm/fedora/virtualbox.repo
+sudo abpm repo add /path/to/custom.repo
 ```
 
 ---

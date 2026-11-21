@@ -38,7 +38,7 @@ public:
     // Désactive un dépôt (refuse si protégé)
     static bool disable_repo(const std::string& repo_id);
 
-    // Ajoute un nouveau dépôt RPM
+    // Ajoute un nouveau dépôt RPM ou Fedora Copr
     static bool add_repo(const std::string& url_or_file);
 };
 

@@ -7,7 +7,7 @@ namespace abpm::cli {
 using core::Logger;
 
 void CliParser::print_version() {
-    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.9");
+    Logger::info("Arrera Blue Package Manager (abpm) version 2026.1.10");
     std::cout << "  Cœur système : libdnf5 (C++)\n"
               << "  Cœur applications : libflatpak (C/GObject)\n";
 }
@@ -28,7 +28,7 @@ void CliParser::print_help() {
               << "  repo list [--json]      Liste tous les depots RPM et Flatpak\n"
               << "  repo enable <ID>        Active un depot logiciel\n"
               << "  repo disable <ID>       Desactive un depot (refuse les depots proteges)\n"
-              << "  repo add <URL/FICHIER>  Ajoute un nouveau depot RPM\n"
+              << "  repo add <CIBLE>        Ajoute un depot RPM (.repo) ou Fedora Copr (ex: user/project)\n"
               << "  config get <CLE>        Affiche une configuration (ex: auto-update)\n"
               << "  config set <CLE> <VAL>  Modifie une configuration (ex: auto-update true/false)\n\n"
               << "  clean [CIBLE]           Nettoie le cache (all, expire-cache, packages)\n"

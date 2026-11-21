@@ -1,5 +1,5 @@
 Name:           abpm
-Version:        2026.1.9
+Version:        2026.1.10
 Release:        1%{?dist}
 Summary:        Arrera Blue Package Manager - Unified package manager for Arrera Blue OS
 Summary(fr):    Gestionnaire de paquets unifié pour Arrera Blue OS
@@ -78,6 +78,11 @@ EOF
 %dir /opt/applications/.icons
 
 %changelog
+* Sat Nov 21 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.10-1
+- Support simplifie de l'ajout de depots Fedora Copr (user/project, copr:user/project, URL web Copr).
+- Ciblage automatique du chroot fedora-44-<arch> pour eviter les erreurs 404 liees a VERSION_ID=2026.
+- Repli automatique sur le telechargement direct du fichier .repo distant en cas d'echec.
+
 * Mon Nov 16 2026 Baptiste Pauchet <baptiste.pauchet13@gmail.com> - 2026.1.9-1
 - Support complet de l'installation et de la desinstallation multi-paquets simultanee (abpm install et abpm remove).
 - Resolution globale en transaction unique pour DNF et Flatpak.

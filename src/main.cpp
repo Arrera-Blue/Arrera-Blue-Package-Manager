@@ -811,7 +811,7 @@ int main(int argc, char* argv[]) {
                 break;
             } else if (subcmd == "add") {
                 if (options.arguments.size() < 2) {
-                    Logger::error("Utilisation : abpm repo add <url_ou_fichier>");
+                    Logger::error("Utilisation : abpm repo add <cible> (ex: user/project, copr:user/project, .repo ou url)");
                     return 1;
                 }
                 if (!RepoBackend::add_repo(options.arguments[1])) return 1;

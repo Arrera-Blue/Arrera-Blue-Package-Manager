@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <unistd.h>
 #include <cctype>
+#include <fstream>
+#include <sys/utsname.h>
 
 namespace abpm::repo {
 
@@ -217,13 +219,169 @@ bool RepoBackend::disable_repo(const std::string& repo_id) {
     return false;
 }
 
+namespace {
+
+// 1. Récupération de la version Fedora de base depuis /etc/os-release
+std::string get_fedora_base_version() {
+    std::ifstream os_file("/etc/os-release");
+    if (os_file.is_open()) {
+        std::string line;
+        while (std::getline(os_file, line)) {
+            if (line.rfind("REDHAT_SUPPORT_PRODUCT_VERSION=", 0) == 0 ||
+                line.rfind("REDHAT_BUGZILLA_PRODUCT_VERSION=", 0) == 0) {
+                auto eq = line.find('=');
+                if (eq != std::string::npos) {
+                    std::string ver = line.substr(eq + 1);
+                    ver.erase(std::remove(ver.begin(), ver.end(), '\"'), ver.end());
+                    ver.erase(std::remove(ver.begin(), ver.end(), '\''), ver.end());
+                    ver.erase(std::remove_if(ver.begin(), ver.end(), ::isspace), ver.end());
+                    if (!ver.empty()) return ver;
+                }
+            }
+        }
+    }
+    return "44"; // Socle Arrera Blue OS 2026
+}
+
+// 2. Détection de l'architecture machine
+std::string get_system_arch() {
+    struct utsname buf;
+    if (uname(&buf) == 0 && buf.machine[0] != '\0') {
+        return std::string(buf.machine);
+    }
+#if defined(__aarch64__)
+    return "aarch64";
+#elif defined(__arm__)
+    return "arm";
+#elif defined(__x86_64__)
+    return "x86_64";
+#elif defined(__i386__)
+    return "i386";
+#else
+    return "x86_64";
+#endif
+}
+
+// 3. Structure d'information Copr
+struct CoprTarget {
+    bool is_copr{false};
+    std::string owner;
+    std::string project;
+};
+
+// 4. Analyse de la chaîne fournie en paramètre
+CoprTarget parse_copr_identifier(const std::string& input) {
+    CoprTarget target;
+    std::string s = input;
+
+    // Suppression des espaces de début et fin
+    s.erase(0, s.find_first_not_of(" \t\n\r"));
+    s.erase(s.find_last_not_of(" \t\n\r") + 1);
+
+    if (s.empty()) return target;
+
+    // Préfixe copr:
+    if (s.rfind("copr:", 0) == 0) {
+        s = s.substr(5);
+    }
+
+    // URL Web copr.fedorainfracloud.org
+    const std::string https_prefix = "https://copr.fedorainfracloud.org/coprs/";
+    const std::string http_prefix = "http://copr.fedorainfracloud.org/coprs/";
+    const std::string domain_prefix = "copr.fedorainfracloud.org/coprs/";
+
+    if (s.rfind(https_prefix, 0) == 0) {
+        s = s.substr(https_prefix.size());
+    } else if (s.rfind(http_prefix, 0) == 0) {
+        s = s.substr(http_prefix.size());
+    } else if (s.rfind(domain_prefix, 0) == 0) {
+        s = s.substr(domain_prefix.size());
+    }
+
+    // Si ça finit par .repo ou commence par / ou ./ ou http, ce n'est pas un identifiant Copr simple
+    if (s.find(".repo") != std::string::npos ||
+        s.rfind("http://", 0) == 0 ||
+        s.rfind("https://", 0) == 0 ||
+        s.rfind("/", 0) == 0 ||
+        s.rfind("./", 0) == 0) {
+        return target;
+    }
+
+    // Extraction owner / project
+    std::vector<std::string> parts;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, '/')) {
+        if (!item.empty()) parts.push_back(item);
+    }
+
+    if (parts.size() >= 2) {
+        target.is_copr = true;
+        target.owner = parts[0];
+        target.project = parts[1];
+    }
+
+    return target;
+}
+
+} // namespace
+
 bool RepoBackend::add_repo(const std::string& url_or_file) {
+    if (url_or_file.empty()) {
+        Logger::error("Paramètre manquant.");
+        Logger::info("Utilisation : abpm repo add <cible> (ex: user/project, copr:user/project, .repo ou url)");
+        return false;
+    }
+
     if (geteuid() != 0) {
         Logger::warning("L'ajout d'un dépôt nécessite les privilèges administrateur (root).");
         Logger::info("Relancez avec sudo ou pkexec : 'sudo abpm repo add " + url_or_file + "'");
         return false;
     }
 
+    auto copr = parse_copr_identifier(url_or_file);
+
+    // =========================================================================
+    // CAS 1 : C'EST UN DÉPÔT COPR
+    // =========================================================================
+    if (copr.is_copr) {
+        std::string copr_full = copr.owner + "/" + copr.project;
+        std::string fedora_ver = get_fedora_base_version();
+        std::string arch = get_system_arch();
+        std::string chroot = "fedora-" + fedora_ver + "-" + arch;
+
+        Logger::info("Détection d'un dépôt Fedora Copr : " + copr_full);
+        Logger::info("Ciblage de la version du socle : Fedora " + fedora_ver + " (" + chroot + ")...");
+
+        // 1. Tenter via dnf copr enable avec le chroot Fedora correspondant
+        std::string cmd = "dnf -y copr enable \"" + copr_full + "\" \"" + chroot + "\"";
+        int ret = std::system(cmd.c_str());
+        if (ret == 0) {
+            Logger::success("Dépôt Copr '" + copr_full + "' activé avec succès pour Fedora " + fedora_ver + " !");
+            return true;
+        }
+
+        // 2. Repli : téléchargement direct du fichier .repo depuis Copr
+        Logger::info("Tentative de téléchargement direct du fichier .repo...");
+        std::string repo_filename = copr.owner + "-" + copr.project + "-fedora-" + fedora_ver + ".repo";
+        std::string repo_url = "https://copr.fedorainfracloud.org/coprs/" + copr.owner + "/" + copr.project +
+                               "/repo/fedora-" + fedora_ver + "/" + repo_filename;
+
+        std::string fallback_cmd = "dnf config-manager addrepo --from-repofile=\"" + repo_url + "\" --overwrite";
+        ret = std::system(fallback_cmd.c_str());
+        if (ret == 0) {
+            Logger::success("Dépôt Copr '" + copr_full + "' configuré avec succès depuis " + repo_url + " !");
+            return true;
+        }
+
+        Logger::error("Échec de l'activation du dépôt Copr '" + copr_full + "'.");
+        return false;
+    }
+
+    // =========================================================================
+    // CAS 2 : C'EST UN FICHIER .REPO CLASSIQUE OU UNE URL
+    // =========================================================================
+    Logger::info("Ajout du dépôt RPM depuis : " + url_or_file + "...");
     std::string cmd = "dnf config-manager addrepo --from-repofile=\"" + url_or_file + "\" --overwrite";
     int ret = std::system(cmd.c_str());
     if (ret == 0) {

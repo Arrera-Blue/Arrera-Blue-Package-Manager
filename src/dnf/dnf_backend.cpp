@@ -14,6 +14,7 @@
 #include <libdnf5/base/goal.hpp>
 #include <libdnf5/base/transaction.hpp>
 #include <libdnf5/base/transaction_package.hpp>
+#include <libdnf5/transaction/transaction_item_action.hpp>
 #include <libdnf5/repo/repo_cache.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -64,9 +65,11 @@ private:
     int m_last_pct = 15;
 };
 
-// Callbacks pour l'installation RPM (mappé de 50% à 95%)
+// Callbacks pour la transaction RPM (mappé de 50% à 95%)
 class AbpmTransactionCallbacks : public libdnf5::rpm::TransactionCallbacks {
 public:
+    explicit AbpmTransactionCallbacks(bool is_remove = false) : m_is_remove(is_remove) {}
+
     void verify_start(uint64_t /*total*/) override {
         ProgressEmitter::emit(52, "Vérification des signatures et de l'intégrité...");
     }
@@ -76,7 +79,11 @@ public:
             uint64_t safe_total = std::max<uint64_t>(1, total);
             int pct = 55 + static_cast<int>((double)amount / safe_total * 40.0); // 55% -> 95%
             std::string name = item.get_package().get_name();
-            ProgressEmitter::emit(pct, "Installation de " + name + " (" + std::to_string(amount + 1) + "/" + std::to_string(total) + ")...");
+            auto action = item.get_action();
+            bool is_remove_action = (action == libdnf5::transaction::TransactionItemAction::REMOVE ||
+                                     action == libdnf5::transaction::TransactionItemAction::REPLACED);
+            std::string verb = is_remove_action ? "Suppression de " : "Installation de ";
+            ProgressEmitter::emit(pct, verb + name + " (" + std::to_string(amount + 1) + "/" + std::to_string(total) + ")...");
         }
     }
 
@@ -118,11 +125,14 @@ public:
 
     void after_complete(bool success) override {
         if (success) {
-            ProgressEmitter::emit(100, "Installation terminée avec succès");
+            ProgressEmitter::emit(100, m_is_remove ? "Suppression terminée avec succès" : "Installation terminée avec succès");
         } else {
             ProgressEmitter::emit_error("Échec de la transaction RPM");
         }
     }
+
+private:
+    bool m_is_remove = false;
 };
 
 class AbpmRepoCallbacks : public libdnf5::repo::RepoCallbacks {
@@ -623,7 +633,13 @@ bool DnfBackend::is_installed(std::string_view name) {
         libdnf5::rpm::PackageQuery q(base);
         q.filter_installed();
         q.filter_name(std::string(name));
-        return !q.empty();
+        if (!q.empty()) return true;
+
+        // Supporte aussi les spécifications complètes NEVRA (ex: kernel-core-7.3.4-200.fc44.x86_64)
+        libdnf5::rpm::PackageQuery q_nevra(base);
+        q_nevra.filter_installed();
+        q_nevra.filter_nevra(std::string(name));
+        return !q_nevra.empty();
     } catch (...) {
         return false;
     }
@@ -662,27 +678,92 @@ std::vector<std::string> DnfBackend::get_available_packages(const std::vector<st
 bool DnfBackend::remove(const std::vector<std::string>& package_names) {
     if (package_names.empty()) return true;
     try {
+        ProgressEmitter::emit(10, "Préparation de la désinstallation DNF...");
+
         libdnf5::Base base;
         base.load_config();
         base.setup();
-        auto repo_sack = base.get_repo_sack();
-        repo_sack->create_repos_from_system_configuration();
-        repo_sack->load_repos();
+        base.get_repo_sack()->load_repos(libdnf5::repo::Repo::Type::SYSTEM);
+
+        // Déverrouillage de protected_packages pour le noyau Fedora si un noyau CachyOS est installé
+        auto is_fedora_kernel_pkg = [](const std::string& name) {
+            if (name == "kernel") return true;
+            if (name.rfind("kernel-", 0) == 0 && name.rfind("kernel-cachyos", 0) != 0) {
+                return true;
+            }
+            return false;
+        };
+
+        bool targets_fedora_kernel = std::any_of(package_names.begin(), package_names.end(), is_fedora_kernel_pkg);
+
+        if (targets_fedora_kernel) {
+            // Vérifier qu'un noyau alternatif (kernel-cachyos*) est installé et non ciblé par la suppression
+            libdnf5::rpm::PackageQuery alt_kernel_q(base);
+            alt_kernel_q.filter_installed();
+            alt_kernel_q.filter_name(std::vector<std::string>{
+                "kernel-cachyos",
+                "kernel-cachyos-core",
+                "kernel-cachyos-lto",
+                "kernel-cachyos-lto-core",
+                "kernel-cachyos-lts",
+                "kernel-cachyos-lts-core"
+            });
+
+            bool has_alt_kernel = false;
+            for (const auto& alt_pkg : alt_kernel_q) {
+                const std::string alt_name = alt_pkg.get_name();
+                if (std::find(package_names.begin(), package_names.end(), alt_name) == package_names.end()) {
+                    has_alt_kernel = true;
+                    break;
+                }
+            }
+
+            if (has_alt_kernel) {
+                auto& protected_opt = base.get_config().get_protected_packages_option();
+                const auto& current_protected = protected_opt.get_value();
+
+                std::vector<std::string> filtered_protected;
+                filtered_protected.push_back(""); // Réinitialise l'OptionStringAppendList avant remplacement
+                std::unordered_set<std::string> seen;
+
+                for (const auto& entry : current_protected) {
+                    if (entry.empty() || entry.rfind("glob:", 0) == 0) continue;
+                    if (entry == "kernel" || entry == "kernel-core" ||
+                        entry == "kernel-modules" || entry == "kernel-modules-core") {
+                        continue;
+                    }
+                    if (seen.insert(entry).second) {
+                        filtered_protected.push_back(entry);
+                    }
+                }
+
+                protected_opt.set(libdnf5::Option::Priority::RUNTIME, filtered_protected);
+                base.get_config().get_protect_running_kernel_option().set(libdnf5::Option::Priority::RUNTIME, true);
+            }
+        }
+
         libdnf5::Goal goal(base);
         for (const auto& pkg : package_names) {
             goal.add_rpm_remove(pkg);
         }
         auto transaction = goal.resolve();
         if (transaction.empty()) {
+            std::string first_err = "Impossible de résoudre la suppression des paquets demandés.";
             for (const auto& log : transaction.get_resolve_logs_as_strings()) {
-                Logger::warning(log);
+                if (first_err == "Impossible de résoudre la suppression des paquets demandés." && !log.empty()) {
+                    first_err = log;
+                }
+                if (!ProgressEmitter::is_enabled()) {
+                    Logger::warning(log);
+                }
             }
+            ProgressEmitter::emit_error(first_err);
             return false;
         }
 
         // Vérifier si d'autres paquets vont être supprimés en cascade
         auto tx_packages = transaction.get_transaction_packages();
-        if (tx_packages.size() > package_names.size()) {
+        if (!ProgressEmitter::is_enabled() && tx_packages.size() > package_names.size()) {
             Logger::warning("Attention : Des paquets dépendants vont également être supprimés en cascade :");
             for (const auto& tp : tx_packages) {
                 const auto& pkg = tp.get_package();
@@ -692,19 +773,27 @@ bool DnfBackend::remove(const std::vector<std::string>& package_names) {
             }
         }
         if (geteuid() != 0) {
-            Logger::warning("La suppression de paquets système DNF nécessite les privilèges administrateur.");
-            Logger::info("Relancez avec sudo pour finaliser la suppression DNF.");
+            ProgressEmitter::emit_error("La suppression de paquets système DNF nécessite les privilèges administrateur.");
+            if (!ProgressEmitter::is_enabled()) {
+                Logger::warning("La suppression de paquets système DNF nécessite les privilèges administrateur.");
+                Logger::info("Relancez avec sudo pour finaliser la suppression DNF.");
+            }
             return false;
         }
-        Logger::info("Désinstallation des paquets RPM en cours...");
-        transaction.set_callbacks(std::make_unique<AbpmTransactionCallbacks>());
+        ProgressEmitter::emit(50, "Suppression des paquets RPM...");
+        if (!ProgressEmitter::is_enabled()) {
+            Logger::info("Désinstallation des paquets RPM en cours...");
+        }
+        transaction.set_callbacks(std::make_unique<AbpmTransactionCallbacks>(true));
         auto result = transaction.run();
         if (result != libdnf5::base::Transaction::TransactionRunResult::SUCCESS) {
+            ProgressEmitter::emit_error("Échec de la transaction de suppression DNF");
             log_transaction_errors(transaction, result);
             return false;
         }
         return true;
     } catch (const std::exception& e) {
+        ProgressEmitter::emit_error(std::string("Erreur suppression DNF : ") + e.what());
         Logger::error(std::string("Erreur suppression DNF : ") + e.what());
         return false;
     }
